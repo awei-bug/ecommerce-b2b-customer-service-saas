@@ -1,0 +1,14 @@
+# 统一换行：仓库内以 LF 存储，避免 Windows/CI(Linux) 之间反复 CRLF 抖动
+* text=auto eol=lf
+
+# 明确二进制，避免被当文本处理
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.pdf binary
+*.sql.gz binary

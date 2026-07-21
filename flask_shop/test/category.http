@@ -1,0 +1,14 @@
+### 增加商品分类
+POST http://127.0.0.1:5000/categorys/
+Content-Type: application/json
+
+{
+    "name": "测试",
+    "level":3
+}
+
+### 获取商品分类列表
+GET http://127.0.0.1:5000/categorys/?pnum=3&psize=2
+
+### 根据level获取分类分组信息
+GET http://127.0.0.1:5000/cate_grup/

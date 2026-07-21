@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  tenant-isolation-tests:
+    name: Tenant isolation & API tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: flask_shop
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run tests (TENANT_STRICT=1)
+        env:
+          TENANT_STRICT: "1"
+          FLASK_ENV: testing
+        run: python -m pytest -q
+
+      - name: Upload pytest report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-logs
+          path: flask_shop/.pytest_cache
+          if-no-files-found: ignore

@@ -1,0 +1,50 @@
+# ---- 根目录忽略 ----
+.env
+deploy/.env.prod
+deploy/certs/*.pem
+deploy/certs/*.key
+deploy/backups/
+**/backups/
+*.sql.gz
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.sqlite
+*.sqlite3
+
+# 虚拟环境
+.venv/
+venv/
+env/
+**/.venv/
+
+# ---- 支付/密钥缓存 ----
+.wechat_certs/
+**/.wechat_certs/
+
+# ---- 上传/运行时产物 ----
+flask_shop/flask_shop/static/upload/*
+!flask_shop/flask_shop/static/upload/.gitkeep
+
+# ---- 前端 ----
+node_modules/
+**/node_modules/
+# 构建产物（体积大，按需再放开）
+vue_shop/dist/
+mall/dist/
+*.local
+
+# ---- 编辑器/系统 ----
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

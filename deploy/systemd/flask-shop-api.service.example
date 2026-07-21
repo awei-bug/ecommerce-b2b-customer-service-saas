@@ -1,0 +1,30 @@
+# systemd unit example for Flask Shop API (no Docker)
+# 1) Copy to /etc/systemd/system/flask-shop-api.service
+# 2) Edit paths and EnvironmentFile
+# 3) systemctl daemon-reload && systemctl enable --now flask-shop-api
+
+[Unit]
+Description=Flask Shop API (Waitress/Gunicorn)
+After=network.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/flask-shop/flask_shop
+EnvironmentFile=/opt/flask-shop/deploy/.env.prod
+Environment=FLASK_CONFIG=product
+Environment=ALLOW_MOCK_PAY=0
+Environment=SMS_DEV_MODE=0
+# Prefer gunicorn on Linux:
+# ExecStart=/opt/flask-shop/flask_shop/.venv/bin/gunicorn -c /opt/flask-shop/deploy/gunicorn.conf.py "wsgi:app"
+ExecStart=/opt/flask-shop/flask_shop/.venv/bin/gunicorn -c /opt/flask-shop/deploy/gunicorn.conf.py "wsgi:app"
+Restart=always
+RestartSec=5
+# Hardening (optional)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

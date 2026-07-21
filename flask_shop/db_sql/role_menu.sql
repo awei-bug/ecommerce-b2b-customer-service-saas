@@ -1,0 +1,12 @@
+insert into t_roles_menus (role_id, menu_id) values (1, 1);
+insert into t_roles_menus (role_id, menu_id) values (1, 2);
+insert into t_roles_menus (role_id, menu_id) values (1, 3);
+insert into t_roles_menus (role_id, menu_id) values (1, 4);
+insert into t_roles_menus (role_id, menu_id) values (1, 11);
+insert into t_roles_menus (role_id, menu_id) values (1, 21);
+insert into t_roles_menus (role_id, menu_id) values (1, 22);
+insert into t_roles_menus (role_id, menu_id) values (1, 31);
+insert into t_roles_menus (role_id, menu_id) values (1, 32);
+insert into t_roles_menus (role_id, menu_id) values (1, 41);
+insert into t_roles_menus (role_id, menu_id) values (3, 1);
+insert into t_roles_menus (role_id, menu_id) values (3, 11);

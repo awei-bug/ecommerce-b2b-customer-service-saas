@@ -1,0 +1,37 @@
+# Flask Shop API — 生产镜像
+# 构建（在仓库根目录）：
+#   docker compose -f deploy/docker-compose.yml build api
+
+FROM python:3.12-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    FLASK_CONFIG=product
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc default-libmysqlclient-dev pkg-config curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY flask_shop/requirements.txt /app/requirements.txt
+RUN pip install --upgrade pip \
+    && pip install -r /app/requirements.txt \
+    && pip install "gunicorn==21.2.0"
+
+COPY flask_shop /app
+COPY deploy/gunicorn.conf.py /app/deploy/gunicorn.conf.py
+
+RUN mkdir -p /app/flask_shop/static/upload /app/deploy /data/backups \
+    && useradd -m -u 10001 appuser \
+    && chown -R appuser:appuser /app /data
+
+USER appuser
+
+EXPOSE 5000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=50s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:5000/health/ || exit 1
+
+CMD ["gunicorn", "-c", "/app/deploy/gunicorn.conf.py", "wsgi:app"]

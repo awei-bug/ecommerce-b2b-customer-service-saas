@@ -1,0 +1,28 @@
+### 增加分类属性
+POST http://127.0.0.1:5000/attributes/
+Content-Type: application/json
+
+{
+    "name": "颜色类型11",
+    "_type": "dynamic",
+    "cid":84
+}
+r
+### 根据分类id获取分类属性
+GET http://127.0.0.1:5000/attributes/?cid=65&_type=dynamic
+
+### 根据属性ID获取分类属性
+GET http://127.0.0.1:5000/attribute/10/
+
+### 根据属性ID更新分类属性
+PUT http://127.0.0.1:5000/attribute/25/
+Content-Type: application/json
+
+{   
+    "name":"型号",
+    "val":"test222",
+    "_type":"static"
+}
+
+### 根据属性ID删除分类属性
+DELETE  http://127.0.0.1:5000/attribute/25/

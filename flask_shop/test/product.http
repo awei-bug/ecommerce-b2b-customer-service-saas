@@ -1,0 +1,40 @@
+### 获取商品列表
+GET http://127.0.0.1:5000/products/
+
+### 根据ID删除商品
+DELETE  http://127.0.0.1:5000/product/6/
+
+### 上传图片
+POST http://127.0.0.1:5000/upload_img/
+Content-Type: multipart/form-data; boundary=myfile
+
+--myfile
+Content-Disposition: form-data; name="file"; filename="tu1.png"
+Content-Type: image/png
+
+< ../tu1.png
+--myfile--
+
+### 商品的添加
+POST http://127.0.0.1:5000/products/
+Content-Type: application/json
+
+{
+    "name": "商品1",
+    "price": 100,
+    "number":200,
+    "weight":10,
+    "introduce":"这个是一个商品的介绍",
+    "cid_one":1,
+    "cid_two":17,
+    "cid_three":65,
+    "pics":["img1.png","img2.png"],
+    "attr_static":[
+        {"id":1,"name":"品牌","val":"soulkiss","_type":"static"},
+        {"id":2,"name":"适用年龄","val":"25-30周岁","_type":"static"}
+    ],
+    "attr_dynamic":[
+        {"id":22,"name":"颜色分类","val":["红色","蓝色","绿色"],"_type":"dynamic"},
+        {"id":21,"name":"尺码","val":["S","M","L"],"_type":"dynamic"}
+    ]
+}

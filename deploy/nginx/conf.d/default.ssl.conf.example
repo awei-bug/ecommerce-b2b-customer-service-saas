@@ -1,0 +1,69 @@
+# HTTPS 示例：把证书放到 deploy/certs/fullchain.pem 与 privkey.pem 后
+# 可重命名启用本文件，并视情况注释 conf.d/default.conf 的 80 反代业务（或 80 仅做跳转）
+
+# HTTP → HTTPS
+server {
+    listen 80 default_server;
+    server_name _;
+
+    location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 'ok';
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name _;
+
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:10m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # API 与业务（同 default.conf）
+    location /api/ {
+        proxy_pass http://api:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+
+    location /health/ {
+        proxy_pass http://api:5000/health/;
+        proxy_set_header Host $host;
+    }
+
+    location ~ ^/(user|menu|roles|role|categorys|attributes|attribute|products|product|orders|order|pay|expresses|freight|permissions|upload_img|cate_grup|dashboard|payments)/ {
+        proxy_pass http://api:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+
+    location /static/upload/ {
+        alias /var/www/uploads/;
+        expires 7d;
+        access_log off;
+    }
+
+    location /admin/ {
+        alias /var/www/admin/;
+        try_files $uri $uri/ /admin/index.html;
+    }
+
+    location / {
+        root /var/www/mall;
+        try_files $uri $uri/ /index.html;
+    }
+}

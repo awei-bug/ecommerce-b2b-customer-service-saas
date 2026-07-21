@@ -1,0 +1,35 @@
+### 获取角色列表
+GET http://127.0.0.1:5000/roles/
+
+### 增加角色
+POST http://127.0.0.1:5000/roles/
+Content-Type: application/json
+
+{
+    "name": "星耀管理员",
+    "desc": "星耀管理员是管理中的VIPP"
+}
+
+### 删除角色
+DELETE http://127.0.0.1:5000/role/2/
+
+
+### 修改角色
+PUT http://127.0.0.1:5000/role/3/
+Content-Type: application/json
+
+{
+    "name": "星耀管理员1",
+    "desc": "星耀管理员是管理中的VIP"
+}
+
+### 给指定角色删除权限
+GET http://127.0.0.1:5000/role/1/11/
+
+### 给指定角色分配权限
+POST http://127.0.0.1:5000/role/3/
+Content-Type: application/json
+
+{
+    "mids": "1,11,2,21"
+}
