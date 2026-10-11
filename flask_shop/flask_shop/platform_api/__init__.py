@@ -18,11 +18,17 @@ SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$')
 
 
 def _check_platform_key():
-    expected = os.getenv('PLATFORM_BOOTSTRAP_KEY', '')
+    from flask import current_app
+    import hmac
+    expected = (
+        current_app.config.get('PLATFORM_BOOTSTRAP_KEY')
+        or os.getenv('PLATFORM_BOOTSTRAP_KEY', '')
+        or ''
+    )
     if not expected:
         return False, {'status': 503, 'msg': '未配置 PLATFORM_BOOTSTRAP_KEY，拒绝开通'}
     got = request.headers.get('X-Platform-Key') or ''
-    if got != expected:
+    if not hmac.compare_digest(str(got), str(expected)):
         return False, {'status': 401, 'msg': '平台密钥无效'}
     return True, None
 
@@ -59,8 +65,8 @@ def create_tenant():
         return {'status': 400, 'msg': 'name/slug/admin_name/admin_password 必填'}
     if not SLUG_RE.match(slug):
         return {'status': 400, 'msg': 'slug 仅允许小写字母数字与中划线，长度 3～32'}
-    if len(admin_password) < 6:
-        return {'status': 400, 'msg': '管理员密码至少 6 位'}
+    if len(admin_password) < 8:
+        return {'status': 400, 'msg': '管理员密码至少 8 位'}
 
     if models.Tenant.query.filter_by(slug=slug).first():
         return {'status': 400, 'msg': 'slug 已存在'}

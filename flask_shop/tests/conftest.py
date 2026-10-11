@@ -50,14 +50,12 @@ def _seed(app):
         cb = models.Category(tenant_id=tb.id, name='B-类目-唯一')
         oa = models.Order(tenant_id=ta.id, order_no='A-ORD-1', price=10, status='pending_pay')
         ob = models.Order(tenant_id=tb.id, order_no='B-ORD-1', price=20, status='paid')
-        sa = models.Shipment(tenant_id=ta.id, shipment_no='A-SHIP-1', status='inquiry')
-        sb = models.Shipment(tenant_id=tb.id, shipment_no='B-SHIP-1', status='booked')
         fra = models.FreightTemplate(tenant_id=ta.id, name='A-运费-唯一')
         frb = models.FreightTemplate(tenant_id=tb.id, name='B-运费-唯一')
         # 非超级角色，仅用于「角色列表隔离」断言
         rola = models.Role(tenant_id=ta.id, name='A-角色-唯一')
         rolb = models.Role(tenant_id=tb.id, name='B-角色-唯一')
-        db.session.add_all([pa, pb, ca, cb, oa, ob, sa, sb, fra, frb, rola, rolb])
+        db.session.add_all([pa, pb, ca, cb, oa, ob, fra, frb, rola, rolb])
         db.session.commit()
 
         token_a = generate_token({'typ': 'merchant', 'staff_id': ua.id, 'tenant_id': ta.id})
@@ -68,7 +66,6 @@ def _seed(app):
             'token_a': token_a, 'token_b': token_b,
             'product_a': pa, 'product_b': pb,
             'order_a': oa, 'order_b': ob,
-            'shipment_a': sa, 'shipment_b': sb,
             'id_a': ta.id, 'id_b': tb.id,
         }
 

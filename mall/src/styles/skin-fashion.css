@@ -1,0 +1,25 @@
+/* 服饰穿搭 */
+html[data-theme="fashion"], :root {
+  --bg: #f5f2f3;
+  --bg-elevated: #fffbfc;
+  --text: #1c1917;
+  --text-secondary: #57534e;
+  --line: #e8e0e3;
+  --brand: #9f1239;
+  --brand-deep: #881337;
+  --brand-soft: #ffe4e6;
+  --accent: #be123c;
+  --price: #9f1239;
+  --trust-bar: #881337;
+}
+html[data-theme="fashion"] .btn.primary, html[data-theme="fashion"] button.btn.primary {
+  background: linear-gradient(180deg, #e11d48, #9f1239) !important;
+  box-shadow: 0 8px 18px rgba(159, 18, 57, 0.28);
+}
+html[data-theme="fashion"] .brand .mark {
+  background: linear-gradient(145deg, #e11d48, #9f1239) !important;
+}
+html[data-theme="fashion"] .aside-card {
+  background: linear-gradient(180deg, #fff, #fff1f2) !important;
+  border-color: #fecdd3 !important;
+}

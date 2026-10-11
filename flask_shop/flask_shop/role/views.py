@@ -131,8 +131,10 @@ def list_action_codes():
         'role:read': '角色-查看',
         'role:write': '角色-编辑',
         'report:read': '数据-查看',
-        'shipment:read': '运单-查看',
-        'shipment:write': '运单-编辑/轨迹',
+        'shop:settings': '店铺-设置',
+        'service:read': '客服-查看会话',
+        'service:reply': '客服-接待回复',
+        'service:manage': '客服-管理优先级',
     }
     data = [{'code': c, 'label': labels.get(c, c)} for c in ALL_ACTION_CODES]
     return {'status': 200, 'msg': 'ok', 'data': data}

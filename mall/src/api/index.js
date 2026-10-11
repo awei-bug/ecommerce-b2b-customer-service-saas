@@ -4,8 +4,20 @@ export function getShop() {
   return http.get('/shop/')
 }
 
+export function trackAttribution(data) {
+  return http.get('/attribution/track/', { params: data })
+}
+
+export function createGrowthLead(data) {
+  return http.post('/leads/', data)
+}
+
 export function getProducts(params) {
   return http.get('/products/', { params })
+}
+
+export function getCategories() {
+  return http.get('/categories/')
 }
 
 export function getProduct(id) {
@@ -33,7 +45,12 @@ export function createAddress(data) {
 }
 
 export function createOrder(data) {
-  return http.post('/orders/', data)
+  const payload = { ...(data || {}) }
+  try {
+    const sessionId = localStorage.getItem('agent_session_id') || ''
+    if (sessionId && !payload.consultation_session_id) payload.consultation_session_id = sessionId
+  } catch (_) {}
+  return http.post('/orders/', payload)
 }
 
 export function getOrders() {
@@ -42,6 +59,10 @@ export function getOrders() {
 
 export function getOrder(id) {
   return http.get(`/order/${id}/`)
+}
+
+export function claimPaid(id, data) {
+  return http.post(`/order/${id}/claim-paid/`, data)
 }
 
 export function createPayment(data) {
@@ -56,16 +77,13 @@ export function previewFreight(data) {
   return http.post('/freight/preview/', data)
 }
 
-/** 客户运单轨迹查询（无需登录） */
-export function trackShipment(no) {
-  return http.get('/shipment/track/', { params: { no } })
+export function getCoupons() {
+  return http.get('/coupons/')
 }
 
-/** 下单并可选立即模拟支付（需已登录） */
-export async function buyAndMaybePay({ pid, number = 1, address, addressId, autoPay = true }) {
-  const payload = {
-    items: [{ pid, number }],
-  }
+/** 下单（人工确认收款，不自动 mock 支付） */
+export async function buyAndMaybePay({ pid, number = 1, address, addressId, autoPay = false }) {
+  const payload = { items: [{ pid, number }] }
   if (addressId) payload.address_id = addressId
   else payload.address = address
 
@@ -73,31 +91,70 @@ export async function buyAndMaybePay({ pid, number = 1, address, addressId, auto
   if (orderRes.status !== 200) {
     throw new Error(orderRes.msg || '下单失败')
   }
-  const order = orderRes.data
-  if (!autoPay) {
-    return { order, paid: false }
-  }
-  const payCreate = await createPayment({ order_id: order.id, channel: 'mock' })
-  if (payCreate.status !== 200) {
-    throw new Error(payCreate.msg || '创建支付单失败')
-  }
-  const outTradeNo = payCreate.data.payment.out_trade_no
-  const payRes = await mockPay({ out_trade_no: outTradeNo })
-  if (payRes.status !== 200) {
-    throw new Error(payRes.msg || '支付失败')
-  }
-  return { order: payRes.data.order || order, paid: true, payment: payRes.data.payment }
+  return { order: orderRes.data, paid: false }
 }
 
-export async function payExistingOrder(orderId) {
-  const payCreate = await createPayment({ order_id: orderId, channel: 'mock' })
-  if (payCreate.status !== 200) {
-    throw new Error(payCreate.msg || '创建支付单失败')
-  }
-  const outTradeNo = payCreate.data.payment.out_trade_no
-  const payRes = await mockPay({ out_trade_no: outTradeNo })
-  if (payRes.status !== 200) {
-    throw new Error(payRes.msg || '支付失败')
-  }
-  return payRes.data
+/** 人工确认模式：不自动 mock */
+export async function payExistingOrder() {
+  throw new Error('本店为人工确认收款，请按付款说明转账并等待店长确认')
 }
+
+/** 多智能体导购（/api/agents，不在 /api/c 下） */
+export async function agentChat(text, extra = {}) {
+  const { getTenantSlug, getToken } = await import('@/utils/session')
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Tenant-Slug': getTenantSlug(),
+  }
+  const token = getToken()
+  if (token) headers.token = token
+  let session_id = extra.session_id
+  try {
+    if (!session_id) session_id = localStorage.getItem('agent_session_id') || ''
+  } catch (_) {}
+  const res = await fetch('/api/agents/chat/', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ text, session_id, ...extra }),
+  })
+  const data = await res.json()
+  try {
+    const sid = data?.data?.session_id
+    if (sid) localStorage.setItem('agent_session_id', sid)
+  } catch (_) {}
+  return data
+}
+
+async function supportRequest(path, options = {}) {
+  const { getTenantSlug, getToken } = await import('@/utils/session')
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Tenant-Slug': getTenantSlug(),
+    ...(options.headers || {}),
+  }
+  const token = getToken()
+  if (token) headers.token = token
+  const response = await fetch(`/api/agents${path}`, { ...options, headers })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data?.msg || '客服服务暂不可用')
+  return data
+}
+
+export function getSupportMessages(sessionId, afterId = 0) {
+  const sid = encodeURIComponent(sessionId)
+  return supportRequest(`/support/session/${sid}/messages/?after_id=${Number(afterId) || 0}`)
+}
+
+export function rateSupportSession(sessionId, score, note = '') {
+  const sid = encodeURIComponent(sessionId)
+  return supportRequest(`/support/session/${sid}/satisfaction/`, {
+    method: 'POST',
+    body: JSON.stringify({ score, note }),
+  })
+}
+
+export function getCart() { return http.get('/cart/') }
+export function addCart(data) { return http.post('/cart/', data) }
+export function updateCartItem(id, data) { return http.put(`/cart/${id}/`, data) }
+export function removeCartItem(id) { return http.delete(`/cart/${id}/`) }
+export function checkoutPreview(data) { return http.post('/checkout/preview/', data) }

@@ -1,0 +1,23 @@
+/* 茶饮滋补 */
+html[data-theme="tea"], :root {
+  --bg: #f4f1e8;
+  --bg-elevated: #fffcf5;
+  --text: #1c1917;
+  --text-secondary: #57534e;
+  --muted: #a8a29e;
+  --line: #e5e0d2;
+  --brand: #3f6212;
+  --brand-deep: #365314;
+  --brand-soft: #ecfccb;
+  --accent: #a16207;
+  --price: #854d0e;
+  --trust-bar: #3f6212;
+  --success: #3f6212;
+}
+html[data-theme="tea"] .btn.primary, html[data-theme="tea"] button.btn.primary {
+  background: linear-gradient(180deg, #4d7c0f, #365314) !important;
+  box-shadow: 0 8px 18px rgba(63, 98, 18, 0.28);
+}
+html[data-theme="tea"] .brand .mark {
+  background: linear-gradient(145deg, #4d7c0f, #365314) !important;
+}

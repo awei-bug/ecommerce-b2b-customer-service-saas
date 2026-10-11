@@ -1,182 +1,83 @@
 <template>
   <div class="page result-page">
-    <div class="card page-card">
-      <div class="icon" :class="statusClass">
-        {{ iconText }}
-      </div>
-      <h2>{{ title }}</h2>
-      <p class="msg">{{ message }}</p>
-
-      <div v-if="orderNo || amount" class="meta">
-        <div v-if="orderNo" class="row"><span>订单号</span><span>{{ orderNo }}</span></div>
-        <div v-if="amount" class="row">
-          <span>金额</span><span class="price">￥{{ formatPrice(amount) }}</span>
-        </div>
+    <div class="shell">
+      <div class="top">
+        <div class="badge">订单已提交</div>
+        <h1>请完成付款</h1>
+        <p class="lead">扫码转账后，店主确认到账就会发货</p>
       </div>
 
-      <div v-if="payGuide && (status === 'await_manual' || status === 'unpaid')" class="guide-box">
-        <div class="g-title">请按商家说明付款</div>
-        <pre class="g-text">{{ payGuide }}</pre>
-        <div v-if="contactPhone" class="phone">联系电话：{{ contactPhone }}</div>
-      </div>
+      <PayGuidePanel
+        class="panel"
+        :order-no="orderNo"
+        :amount="amount"
+      />
 
       <div class="actions">
-        <button class="btn primary" type="button" @click="$router.replace('/orders')">
-          查看我的订单
-        </button>
-        <button class="btn ghost" type="button" @click="$router.replace('/')">
-          继续购物
-        </button>
+        <button class="btn primary" type="button" @click="$router.replace('/orders')">我已付款，查看订单</button>
+        <button class="btn ghost" type="button" @click="$router.replace('/')">返回首页</button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { getShop } from '@/api'
+import PayGuidePanel from '@/components/PayGuidePanel.vue'
+import { loadShop } from '@/utils/shop'
 
 const route = useRoute()
-const payGuide = ref('')
-const contactPhone = ref('')
-const status = computed(() => String(route.query.status || 'await_manual'))
-const orderNo = computed(() => route.query.order_no || '')
+const orderNo = computed(() => String(route.query.order_no || ''))
 const amount = computed(() => route.query.amount || '')
 
-const message = computed(() => {
-  if (route.query.msg) return String(route.query.msg)
-  if (status.value === 'success') return '订单已支付，商家将尽快处理发货'
-  if (status.value === 'await_manual') {
-    return '订单已提交。请按付款说明完成转账，并备注订单号；商家确认到账后会更新状态。'
-  }
-  if (status.value === 'unpaid') return '订单已创建，等待付款确认'
-  return '支付未完成，可在订单列表查看状态'
-})
-
-const title = computed(() => {
-  if (status.value === 'success') return '支付成功'
-  if (status.value === 'await_manual') return '订单已提交'
-  if (status.value === 'unpaid') return '待支付'
-  return '未完成'
-})
-
-const iconText = computed(() => {
-  if (status.value === 'success') return '✓'
-  if (status.value === 'await_manual' || status.value === 'unpaid') return '!'
-  return '✗'
-})
-
-const statusClass = computed(() => {
-  if (status.value === 'success') return 'success'
-  if (status.value === 'await_manual' || status.value === 'unpaid') return 'unpaid'
-  return 'fail'
-})
-
-function formatPrice(n) {
-  return Number(n || 0).toFixed(2)
-}
-
-onMounted(async () => {
-  try {
-    const res = await getShop()
-    if (res.status === 200) {
-      payGuide.value = res.data?.pay_guide || ''
-      contactPhone.value = res.data?.contact_phone || ''
-    }
-  } catch (_) {
-    /* ignore */
-  }
+onMounted(() => {
+  loadShop()
 })
 </script>
 
 <style scoped>
 .result-page {
+  min-height: 70vh;
+  padding: 20px 12px 40px;
   display: flex;
   justify-content: center;
-  padding-top: 40px;
 }
-.card {
-  width: 100%;
-  max-width: 520px;
+.shell {
+  width: min(440px, 100%);
+}
+.top {
   text-align: center;
-  padding: 36px 32px;
+  margin-bottom: 14px;
 }
-.icon {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  margin: 0 auto 12px;
-  display: grid;
-  place-items: center;
-  font-size: 28px;
-  color: #fff;
-  background: var(--ok);
-}
-.icon.fail,
-.icon.error {
-  background: var(--danger);
-}
-.icon.unpaid {
-  background: var(--warn, #fa8c16);
-}
-h2 {
-  margin: 8px 0;
-  font-size: 22px;
-}
-.msg {
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.6;
-  margin: 0 0 16px;
-}
-.meta {
-  text-align: left;
-  background: #f7f8fa;
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin-bottom: 16px;
-}
-.row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 13px;
-  padding: 4px 0;
-}
-.price {
-  color: var(--danger);
+.badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 12px;
   font-weight: 700;
-}
-.guide-box {
-  text-align: left;
-  border: 1px dashed #ffd591;
-  background: #fffbe6;
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin-bottom: 16px;
-}
-.g-title {
-  font-weight: 600;
   margin-bottom: 8px;
+}
+h1 {
+  margin: 0 0 6px;
+  font-size: 24px;
+  color: #1c1917;
+}
+.lead {
+  margin: 0;
+  color: #78716c;
   font-size: 14px;
 }
-.g-text {
-  margin: 0;
-  white-space: pre-wrap;
-  font-family: inherit;
-  font-size: 13px;
-  line-height: 1.6;
-  color: #595959;
-}
-.phone {
-  margin-top: 10px;
-  font-size: 13px;
-  color: #8c8c8c;
-}
+.panel { margin-bottom: 16px; }
 .actions {
   display: flex;
+  flex-direction: column;
   gap: 10px;
-  justify-content: center;
-  flex-wrap: wrap;
+}
+.actions .btn {
+  width: 100%;
+  min-height: 44px;
 }
 </style>

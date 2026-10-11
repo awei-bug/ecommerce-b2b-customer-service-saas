@@ -39,12 +39,16 @@ services:
     env_file:
       - .env.prod
     environment:
-      FLASK_CONFIG: product
+      FLASK_CONFIG: ${FLASK_CONFIG:-product}
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
+      DATABASE_URL: ""
       ALLOW_MOCK_PAY: ${ALLOW_MOCK_PAY:-0}
       PAY_DEFAULT_CHANNEL: ${PAY_DEFAULT_CHANNEL:-mock}
       SMS_DEV_MODE: ${SMS_DEV_MODE:-0}
+      PRIVATE_DEPLOY: ${PRIVATE_DEPLOY:-1}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://127.0.0.1:18080}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://127.0.0.1:18080,http://localhost:18080}
     volumes:
       - shop_uploads:/app/flask_shop/static/upload
       - shop_backups:/data/backups

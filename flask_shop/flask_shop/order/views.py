@@ -3,7 +3,7 @@ import io
 import uuid
 from datetime import datetime
 
-from flask import Response, request
+from flask import Response, request, current_app, g
 from flask_restful import Resource, reqparse
 
 from flask_shop import models, db
@@ -24,6 +24,7 @@ from flask_shop.utils.order_state import (
 from flask_shop.utils.stock import StockError, dec_stock, inc_stock
 from flask_shop.utils.audit import write_audit
 from flask_shop.utils.freight import calc_order_freight
+from flask_shop.utils.money import money_add, money_float, money_mul
 
 
 def _gen_order_no(tenant_id):
@@ -39,7 +40,13 @@ def _filter_orders_query(args):
         query = query.filter(models.Order.status == args['status'])
     if args.get('order_no'):
         query = query.filter(models.Order.order_no == args['order_no'])
-    return query.order_by(models.Order.id.desc())
+    claimed = args.get('claimed')
+    if claimed in (1, '1', True, 'true', 'True'):
+        query = query.filter(models.Order.buyer_paid_claimed == 1)
+    return query.order_by(
+        models.Order.buyer_paid_claimed.desc(),
+        models.Order.id.desc(),
+    )
 
 
 class Orders(Resource):
@@ -50,16 +57,33 @@ class Orders(Resource):
         from flask_shop.utils.rbac import staff_has_permission
         if not staff_has_permission('order:read'):
             return {'status': 403, 'msg': '无权限查看订单'}
+        # 懒触发：读取订单列表前，关闭本租户超时未支付订单并回收库存。
+        # ORDER_PENDING_TIMEOUT_MINUTES<=0 时函数为 no-op，不影响性能。
+        try:
+            from flask_shop.utils.order_timeout import close_expired_pending_orders
+            close_expired_pending_orders(tenant_id=require_tenant_id())
+        except Exception:
+            current_app.logger.exception('auto-close expired orders failed')
         parser = reqparse.RequestParser()
         parser.add_argument('name', type=str, location='args')
         parser.add_argument('status', type=str, location='args')
         parser.add_argument('order_no', type=str, location='args')
+        parser.add_argument('claimed', type=int, location='args')
+        parser.add_argument('pageNum', type=int, location='args', default=1)
+        parser.add_argument('pageSize', type=int, location='args', default=20)
         args = parser.parse_args()
-        order_list = _filter_orders_query(args).all()
+        query = _filter_orders_query(args)
+        page = max(int(args.get('pageNum') or 1), 1)
+        size = min(max(int(args.get('pageSize') or 20), 1), 100)
+        total = query.count()
+        order_list = query.offset((page - 1) * size).limit(size).all()
         return {
             'status': 200,
             'msg': '获取订单列表成功',
-            'data': [order.to_dict() for order in order_list]
+            'data': [order.to_dict() for order in order_list],
+            'total': total,
+            'pageNum': page,
+            'pageSize': size,
         }
 
     def post(self):
@@ -87,7 +111,11 @@ class Orders(Resource):
             product = get_for_tenant(models.Product, pid)
             if not product:
                 return {'status': 404, 'msg': f'商品 {pid} 不存在'}
-            unit_price = float(product.price)
+            # B 端代客下单：禁止下架商品（state=0）；state 为 None 或 2 视为可售
+            st = getattr(product, 'state', None)
+            if st is not None and int(st) == 0:
+                return {'status': 400, 'msg': f'商品 {product.name} 已下架，不可下单'}
+            unit_price = money_float(product.price)
             sku_label = None
             if sku_id:
                 sku = models.ProductSku.query.filter_by(
@@ -95,24 +123,61 @@ class Orders(Resource):
                 ).first()
                 if not sku:
                     return {'status': 400, 'msg': f'SKU {sku_id} 不存在'}
-                unit_price = float(sku.price if sku.price is not None else product.price)
+                unit_price = money_float(sku.price if sku.price is not None else product.price)
                 sku_label = sku.to_dict().get('label')
             elif product.skus.filter_by(status=1).count() > 0:
                 return {'status': 400, 'msg': f'商品 {product.name} 有多规格，请传 sku_id'}
-            line_total = unit_price * number
-            total_price += line_total
+            line_total = money_mul(unit_price, number)
+            total_price = money_add(total_price, line_total)
             total_number += number
             line_rows.append((product, number, unit_price, line_total, sku_id, sku_label))
 
         from flask import g
-        goods_amount = round(total_price, 2)
+        from flask_shop.utils.sms import normalize_phone
+
+        # 代客下单：可按手机号绑定/创建买家
+        customer_id = body.get('customer_id')
+        phone = normalize_phone(body.get('customer_phone') or body.get('phone'))
+        nickname = (body.get('customer_nickname') or body.get('nickname') or '').strip() or None
+        contact_name = (body.get('contact_name') or '').strip()
+        contact_phone = normalize_phone(body.get('contact_phone')) or phone
+        if phone and not customer_id:
+            customer = models.Customer.query.filter_by(tenant_id=tenant_id, phone=phone).first()
+            if not customer:
+                customer = models.Customer(
+                    tenant_id=tenant_id,
+                    phone=phone,
+                    nickname=nickname or f'用户{phone[-4:]}',
+                    status=1,
+                )
+                db.session.add(customer)
+                db.session.flush()
+            elif nickname and not customer.nickname:
+                customer.nickname = nickname
+            customer_id = customer.id
+        if customer_id:
+            # 校验归属本租户
+            c_ok = models.Customer.query.filter_by(id=customer_id, tenant_id=tenant_id).first()
+            if not c_ok:
+                return {'status': 400, 'msg': '买家不存在或不属于本店'}
+
+        # 地址拼接收件人信息，便于发货
+        address = (address or '').strip()
+        if contact_name or contact_phone:
+            head = f"{contact_name or ''} {contact_phone or ''}".strip()
+            if head and head not in address:
+                address = f"{head} {address}".strip()
+        if not address:
+            return {'status': 400, 'msg': '请填写收货地址'}
+
+        goods_amount = money_float(total_price)
         freight_amount, tpl = calc_order_freight(
             tenant_id, goods_amount, total_number, body.get('freight_template_id')
         )
         order = models.Order(
             tenant_id=tenant_id,
             order_no=_gen_order_no(tenant_id),
-            price=round(goods_amount + freight_amount, 2),
+            price=money_float(money_add(goods_amount, freight_amount)),
             goods_amount=goods_amount,
             freight_amount=freight_amount,
             freight_template_id=tpl.id if tpl else None,
@@ -124,6 +189,7 @@ class Orders(Resource):
             fapiao_title=body.get('fapiao_title'),
             fapiao_content=body.get('fapiao_content'),
             uid=g.staff_id,
+            customer_id=customer_id,
         )
         db.session.add(order)
         db.session.flush()
@@ -259,7 +325,7 @@ def export_payments():
     for p in payments:
         o = order_map.get(p.order_id)
         if p.status == 'success':
-            total_success += float(p.amount or 0)
+            total_success = money_add(total_success, p.amount or 0)
             count_success += 1
         writer.writerow([
             p.id,
@@ -338,9 +404,16 @@ def dashboard_kpi():
         return {'status': 403, 'msg': '无权限查看数据'}
 
     tenant_id = require_tenant_id()
+    closed_expired = 0
+    try:
+        from flask_shop.utils.order_timeout import close_expired_pending_orders
+        closed_expired = close_expired_pending_orders(tenant_id=tenant_id)
+    except Exception:
+        current_app.logger.exception('dashboard auto-close expired orders failed')
     now = datetime.now()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     day7_start = today_start - timedelta(days=6)
+    day30_start = today_start - timedelta(days=29)
 
     # 状态计数
     status_rows = db.session.query(
@@ -421,6 +494,118 @@ def dashboard_kpi():
         for k, v in by_status.items() if v
     ]
 
+    def _ord(o):
+        return {
+            'id': o.id,
+            'order_no': o.order_no,
+            'price': float(o.price or 0),
+            'status': o.status,
+            'buyer_paid_claimed': int(getattr(o, 'buyer_paid_claimed', 0) or 0),
+            'buyer_paid_note': getattr(o, 'buyer_paid_note', None),
+            'buyer_paid_at': o.buyer_paid_at.strftime('%Y-%m-%d %H:%M:%S') if getattr(o, 'buyer_paid_at', None) else None,
+            'address': o.address,
+        }
+
+    claimed_q = (
+        models.Order.query.filter_by(tenant_id=tenant_id, status='pending_pay', buyer_paid_claimed=1)
+        .order_by(models.Order.buyer_paid_at.desc(), models.Order.id.desc())
+        .limit(8).all()
+    )
+    pending_q = (
+        models.Order.query.filter(
+            models.Order.tenant_id == tenant_id,
+            models.Order.status == 'pending_pay',
+            db.or_(models.Order.buyer_paid_claimed.is_(None), models.Order.buyer_paid_claimed == 0),
+        ).order_by(models.Order.id.desc()).limit(8).all()
+    )
+    ship_q = (
+        models.Order.query.filter_by(tenant_id=tenant_id, status='paid')
+        .order_by(models.Order.paid_at.desc(), models.Order.id.desc())
+        .limit(8).all()
+    )
+    low_q = (
+        models.Product.query.filter(
+            models.Product.tenant_id == tenant_id,
+            models.Product.number.isnot(None),
+            models.Product.number <= 5,
+            db.or_(models.Product.state == 2, models.Product.state.is_(None)),
+        ).order_by(models.Product.number.asc()).limit(8).all()
+    )
+    claimed_pay_rows = [_ord(o) for o in claimed_q]
+    pending_pay_rows = [_ord(o) for o in pending_q]
+    pending_ship_rows = [_ord(o) for o in ship_q]
+    low_stock_rows = [{'id': p.id, 'name': p.name, 'stock': int(p.number or 0)} for p in low_q]
+    claimed_pay_n = models.Order.query.filter_by(
+        tenant_id=tenant_id, status='pending_pay', buyer_paid_claimed=1
+    ).count()
+
+    # 老板视角：客服是否替代人工、是否促进成交、当前最该处理什么。
+    traces = models.AgentTrace.query.filter(
+        models.AgentTrace.tenant_id == tenant_id,
+        models.AgentTrace.channel == 'mall_chat',
+        models.AgentTrace.create_time >= day30_start,
+    ).all()
+    session_ids = {x.session_id for x in traces if x.session_id}
+    transferred_sessions = {x.session_id for x in traces if x.session_id and (x.need_human or x.blocked)}
+    ai_resolved_sessions = session_ids - transferred_sessions
+    support_rows = models.SupportConversation.query.filter(
+        models.SupportConversation.tenant_id == tenant_id,
+        models.SupportConversation.create_time >= day30_start,
+    ).all()
+    first_response_minutes = [
+        max((row.first_response_at - row.create_time).total_seconds() / 60, 0)
+        for row in support_rows
+        if row.first_response_at and row.create_time
+    ]
+    satisfaction_rows = [row.satisfaction for row in support_rows if row.satisfaction is not None]
+    baseline_minutes = max(int(current_app.config.get('SUPPORT_BASELINE_MINUTES', 6)), 1)
+
+    assisted_orders = models.Order.query.filter(
+        models.Order.tenant_id == tenant_id,
+        models.Order.create_time >= day30_start,
+        models.Order.consultation_session_id.isnot(None),
+        models.Order.consultation_session_id != '',
+    ).all()
+    assisted_paid = [row for row in assisted_orders if (row.status or '') in paid_like]
+    assisted_gmv = round(sum(float(row.price or 0) for row in assisted_paid), 2)
+
+    waiting_service = sum(1 for row in support_rows if row.status == 'waiting')
+    active_service = sum(1 for row in support_rows if row.status == 'active')
+    priority_items = []
+    if claimed_pay_n:
+        priority_items.append({
+            'code': 'claimed_pay', 'level': 'urgent', 'count': claimed_pay_n,
+            'title': '核对顾客已付款申报', 'detail': '核对到账后及时确认，避免顾客等待。',
+            'route': '/order_list?status=pending_pay&claimed=1',
+        })
+    if waiting_service:
+        priority_items.append({
+            'code': 'support_waiting', 'level': 'urgent', 'count': waiting_service,
+            'title': '接待等待中的顾客', 'detail': '人工队列正在等待，优先处理高风险和售后咨询。',
+            'route': '/customer_service',
+        })
+    if by_status.get('paid', 0):
+        priority_items.append({
+            'code': 'pending_ship', 'level': 'warning', 'count': by_status.get('paid', 0),
+            'title': '处理待发货订单', 'detail': '已确认收款，需进入发货流程。',
+            'route': '/order_list?status=paid',
+        })
+    if by_status.get('refunding', 0):
+        priority_items.append({
+            'code': 'refunding', 'level': 'warning', 'count': by_status.get('refunding', 0),
+            'title': '处理售后申请', 'detail': '退款和售后需要人工确认，避免升级为投诉。',
+            'route': '/order_list?status=refunding',
+        })
+    if low_stock:
+        priority_items.append({
+            'code': 'low_stock', 'level': 'attention', 'count': low_stock,
+            'title': '检查低库存商品', 'detail': '避免继续销售后出现缺货。',
+            'route': '/product_list',
+        })
+
+    tenant = getattr(g, 'tenant', None)
+    data_source = getattr(tenant, 'data_mode', None) or ('demo' if getattr(tenant, 'slug', None) == 'demo' else 'live')
+
     return {
         'status': 200,
         'msg': 'ok',
@@ -434,6 +619,14 @@ def dashboard_kpi():
                 'pending_ship': by_status.get('paid', 0),
                 'refunding': by_status.get('refunding', 0),
                 'low_stock': low_stock,
+                'claimed_pay': claimed_pay_n,
+                'closed_expired': closed_expired,
+            },
+            'queues': {
+                'claimed_pay': claimed_pay_rows,
+                'pending_pay': pending_pay_rows,
+                'pending_ship': pending_ship_rows,
+                'low_stock': low_stock_rows,
             },
             'products': {
                 'total': product_total,
@@ -444,6 +637,31 @@ def dashboard_kpi():
             'by_status': by_status,
             'status_pie': status_pie,
             'trend_7d': trend_7d,
+            'business': {
+                'period_days': 30,
+                'data_source': data_source,
+                'generated_at': now.isoformat(timespec='seconds'),
+                'service': {
+                    'sessions': len(session_ids),
+                    'ai_resolved': len(ai_resolved_sessions),
+                    'transferred': len(transferred_sessions),
+                    'ai_resolution_rate': round(len(ai_resolved_sessions) / len(session_ids) * 100, 1) if session_ids else None,
+                    'estimated_saved_hours': round(len(ai_resolved_sessions) * baseline_minutes / 60, 1),
+                    'baseline_minutes': baseline_minutes,
+                    'waiting': waiting_service,
+                    'active': active_service,
+                    'avg_first_response_minutes': round(sum(first_response_minutes) / len(first_response_minutes), 1) if first_response_minutes else None,
+                    'satisfaction': round(sum(satisfaction_rows) / len(satisfaction_rows), 1) if satisfaction_rows else None,
+                    'rated_count': len(satisfaction_rows),
+                },
+                'conversion': {
+                    'assisted_orders': len(assisted_orders),
+                    'assisted_paid_orders': len(assisted_paid),
+                    'assisted_gmv': assisted_gmv,
+                    'method': 'explicit_session_id',
+                },
+                'priorities': priority_items[:5],
+            },
         }
     }
 
@@ -574,7 +792,7 @@ def ship_order(id):
             tenant_id=order.tenant_id,
             oid=order.id,
             content=content,
-            update_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            update_time=datetime.now(),
         )
         db.session.add(express)
     db.session.commit()

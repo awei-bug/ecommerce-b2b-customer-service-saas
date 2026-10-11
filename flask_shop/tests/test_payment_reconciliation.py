@@ -182,3 +182,64 @@ def test_cross_tenant_payment_detail_404(api, app):
     # 租户 B 用自己的 token 查询 A 的支付单号 → 必须 404
     rv = c.get(f'/pay/{out_trade_no}/', headers={'token': s['token_b']}).get_json()
     assert rv['status'] == 404
+
+
+# ---------- 安全回归：关闭 ALLOW_MOCK_PAY 后 mock 渠道必须被拒 ----------
+
+def test_mock_pay_blocked_when_disabled(api, app):
+    """
+    生产环境必须显式开启 ALLOW_MOCK_PAY 才允许 mock。
+    fail-closed：关闭后，mock 下单与 mock 回调都应返回 403，杜绝「假支付成功」。
+    """
+    c, s = api['client'], api['seed']
+    app.config['ALLOW_MOCK_PAY'] = False
+    try:
+        pid = _stock_product(app, s['id_a'], 'PAY-禁用mock商品-A')
+        order = _create_order(c, s['token_a'], pid)['data']
+
+        # 1) 发起 mock 支付 → 403（视图层闸门）
+        p = _pay_create(c, s['token_a'], order['id'])
+        assert p['status'] == 403, p
+        assert 'mock' in p['msg'].lower()
+
+        # 2) mock 回调（无论单号是否有效）→ 403（mock_notify 闸门）
+        n = _mock_notify(c, s['token_a'], 'P-DOES-NOT-EXIST')
+        assert n['status'] == 403, n
+        assert 'mock' in n['msg'].lower()
+    finally:
+        app.config['ALLOW_MOCK_PAY'] = True
+
+
+# ---------- 超时关单：close_expired_pending_orders 真正生效 ----------
+
+def test_expired_pending_order_auto_closed(api, app):
+    """
+    ORDER_PENDING_TIMEOUT_MINUTES>0 时，超时未支付订单应被自动关闭并回库存。
+    直接调用 close_expired_pending_orders（跨租户上下文），验证状态机 + 库存回滚。
+    """
+    from datetime import datetime, timedelta
+    from flask_shop.utils.order_timeout import close_expired_pending_orders
+
+    c, s = api['client'], api['seed']
+    pid = _stock_product(app, s['id_a'], 'PAY-超时商品-A', number=10)
+    order = _create_order(c, s['token_a'], pid, number=2)['data']
+    order_id = order['id']
+
+    # 把订单 create_time 拨到 60 分钟前（超过默认 30 分钟超时）
+    with app.app_context():
+        with tenant_context(disabled=True):
+            o = models.Order.query.get(order_id)
+            o.create_time = datetime.now() - timedelta(minutes=60)
+            db.session.commit()
+
+            n = close_expired_pending_orders(tenant_id=s['id_a'])
+
+    assert n == 1, '应关闭 1 个超时订单'
+    # 订单已关闭
+    d = c.get(f'/order/{order_id}/', headers={'token': s['token_a']}).get_json()
+    assert d['data']['status'] == 'closed'
+    # 库存已回滚（10 - 2 扣减 + 2 回滚 = 10）
+    with app.app_context():
+        with tenant_context(disabled=True):
+            p = models.Product.query.get(pid)
+            assert p.number == 10

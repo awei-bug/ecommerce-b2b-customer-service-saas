@@ -3,11 +3,11 @@ const TOKEN_KEY = 'mall_customer_token'
 const CUSTOMER_KEY = 'mall_customer'
 
 export function getTenantSlug() {
-  return localStorage.getItem(TENANT_KEY) || 'demo-a'
+  return localStorage.getItem(TENANT_KEY) || 'demo'
 }
 
 export function setTenantSlug(slug) {
-  localStorage.setItem(TENANT_KEY, slug || 'demo-a')
+  localStorage.setItem(TENANT_KEY, slug || 'demo')
   // 切换店铺时清登录（不同租户买家不互通）
   clearAuth()
 }

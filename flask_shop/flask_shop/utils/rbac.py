@@ -1,13 +1,12 @@
-"""
+﻿"""
 B 端接口级 RBAC（动作级细拆）
 
 两层：
   1) 菜单 path：控制前端侧栏可见（role.menus）
   2) 动作码 perm_codes：控制接口能否执行（role.perm_codes JSON）
 
-超级管理员（角色名含「超级」/admin）：全部放行。
-
-若 perm_codes 为空：回退到「菜单 path → 动作」宽松映射（兼容旧数据）。
+超级管理员（角色名含「超级」/admin，或 is_super 标记）：全部放行。
+若 perm_codes 为空：回退到「菜单 path -> 动作」宽映射（兼容老数据）。
 """
 import json
 from functools import wraps
@@ -34,11 +33,13 @@ ALL_ACTION_CODES = [
     'role:read',
     'role:write',
     'report:read',
-    'shipment:read',
-    'shipment:write',
+    'shop:settings',
+    'service:read',
+    'service:reply',
+    'service:manage',
 ]
 
-# 旧数据回退：仅有菜单 path 时，按 path 推导动作（偏宽松）
+# 老数据回退：仅有菜单 path 时，按 path 推导动作（偏宽松）
 MENU_PATH_TO_ACTIONS = {
     'order_list': [
         'order:read', 'order:create', 'order:mark_paid', 'order:ship',
@@ -54,7 +55,9 @@ MENU_PATH_TO_ACTIONS = {
     'author_list': ['role:read'],
     'data_list': ['report:read'],
     'reports': ['report:read'],
-    'shipment_list': ['shipment:read', 'shipment:write'],
+    'shop_settings': ['shop:settings'],
+    'customer_service': ['service:read', 'service:reply'],
+    'knowledge_base': ['service:read'],
 }
 
 # 角色模板（种子）
@@ -63,40 +66,39 @@ ROLE_TEMPLATES = {
         'desc': '看单、确认收款、发货；不可管员工、不可退款',
         'menu_paths': {
             'goods', 'product_list', 'group_list', 'attribute_list',
-            'orders', 'order_list', 'reports', 'data_list', 'shipment_list',
+            'orders', 'order_list', 'reports', 'data_list',
+            'shop_settings',
         },
         'perm_codes': [
             'order:read', 'order:mark_paid', 'order:ship', 'order:complete',
             'order:export', 'product:read', 'report:read',
-            'shipment:read', 'shipment:write',
+            'shop:settings',
         ],
     },
     '仓管': {
         'desc': '仅履约：查看订单与发货',
-        'menu_paths': {'orders', 'order_list', 'shipment_list'},
+        'menu_paths': {'orders', 'order_list'},
         'perm_codes': [
             'order:read', 'order:ship', 'order:complete',
-            'shipment:read', 'shipment:write',
         ],
     },
     '运营': {
         'desc': '商品与数据，只读订单',
         'menu_paths': {
             'goods', 'product_list', 'group_list', 'attribute_list',
-            'orders', 'order_list', 'reports', 'data_list', 'shipment_list',
+            'orders', 'order_list', 'reports', 'data_list',
         },
         'perm_codes': [
             'product:read', 'product:write', 'category:write',
             'order:read', 'order:export', 'report:read',
-            'shipment:read',
         ],
     },
     '客服': {
-        'desc': '订单查询与售后处理',
-        'menu_paths': {'orders', 'order_list', 'shipment_list'},
+        'desc': '客服会话、订单查询与售后处理',
+        'menu_paths': {'orders', 'order_list', 'customer_service', 'knowledge_base'},
         'perm_codes': [
             'order:read', 'order:cancel', 'order:refund', 'order:export',
-            'shipment:read', 'shipment:write',
+            'service:read', 'service:reply',
         ],
     },
 }
@@ -105,8 +107,17 @@ ROLE_TEMPLATES = {
 def _is_super_role(role):
     if not role:
         return False
-    name = (role.name or '')
-    return name in ('超级管理员', 'admin', 'Admin') or '超级' in name
+    # 优先显式标记（若后续加字段 is_super）
+    if getattr(role, 'is_super', None):
+        return bool(role.is_super)
+    name = (role.name or '').strip().lower()
+    # 严格匹配，避免「超级」子串误伤/误授：仅完整名
+    if name in ('超级管理员', 'admin', 'superadmin', 'super_admin'):
+        return True
+    # 兼容中文原名
+    if (role.name or '') in ('超级管理员',):
+        return True
+    return False
 
 
 def _parse_perm_codes(role):

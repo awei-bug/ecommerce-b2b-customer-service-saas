@@ -28,8 +28,10 @@ const routes = [
     component: () => import('@/views/OrderDetail.vue'),
     meta: { title: '订单详情', requireAuth: true },
   },
+  { path: '/pay', name: 'pay', component: () => import('@/views/PayView.vue'), meta: { title: '扫码支付', requireAuth: true } },
   { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { title: '登录' } },
-  { path: '/track', name: 'track', component: () => import('@/views/TrackView.vue'), meta: { title: '运单查询' } },
+  { path: '/cart', name: 'cart', component: () => import('@/views/CartView.vue'), meta: { title: '购物车', requireAuth: true } },
+  { path: '/agent', name: 'agent', component: () => import('@/views/AgentChat.vue'), meta: { title: '导购客服' } },
 ]
 
 const router = createRouter({

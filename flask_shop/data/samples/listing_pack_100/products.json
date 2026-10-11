@@ -1,0 +1,905 @@
+{
+  "publish": true,
+  "products": [
+    {
+      "name": "云柔纯棉短袖T恤",
+      "price": 79.0,
+      "stock": 120,
+      "introduce": "【服饰】100% 精梳棉，亲肤透气，夏季日常百搭，水洗不易变形。",
+      "images": [
+        "images/001.jpg"
+      ]
+    },
+    {
+      "name": "重磅连帽卫衣",
+      "price": 159.0,
+      "stock": 80,
+      "introduce": "【服饰】400g 重磅面料，连帽抽绳，内里加绒，秋冬通勤休闲都合适。",
+      "images": [
+        "images/002.jpg"
+      ]
+    },
+    {
+      "name": "直筒阔腿牛仔裤",
+      "price": 189.0,
+      "stock": 70,
+      "introduce": "【服饰】中腰直筒版型，显腿长，水洗蓝不易掉色，四季可穿。",
+      "images": [
+        "images/003.jpg"
+      ]
+    },
+    {
+      "name": "速干运动短裤",
+      "price": 69.0,
+      "stock": 150,
+      "introduce": "【服饰】轻薄速干，侧边口袋，跑步健身通勤都能穿。",
+      "images": [
+        "images/004.jpg"
+      ]
+    },
+    {
+      "name": "针织开衫外套",
+      "price": 199.0,
+      "stock": 60,
+      "introduce": "【服饰】柔软针织，薄款外搭，办公室空调房和春秋出游都好用。",
+      "images": [
+        "images/005.jpg"
+      ]
+    },
+    {
+      "name": "亚麻休闲衬衫",
+      "price": 129.0,
+      "stock": 90,
+      "introduce": "【服饰】亚麻混纺，透气有垂感，适合夏天通勤和度假。",
+      "images": [
+        "images/006.jpg"
+      ]
+    },
+    {
+      "name": "轻薄防晒衣",
+      "price": 99.0,
+      "stock": 110,
+      "introduce": "【服饰】UPF50+ 防晒，皮肤衣版型，可收纳进口袋，骑车徒步用。",
+      "images": [
+        "images/007.jpg"
+      ]
+    },
+    {
+      "name": "高腰瑜伽裤",
+      "price": 89.0,
+      "stock": 100,
+      "introduce": "【服饰】高腰收腹，裸感面料，深蹲不掉档，健身和日常都能穿。",
+      "images": [
+        "images/008.jpg"
+      ]
+    },
+    {
+      "name": "经典棒球帽",
+      "price": 49.0,
+      "stock": 160,
+      "introduce": "【服饰】硬顶弯檐，可调节帽围，遮阳又好配衣服。",
+      "images": [
+        "images/009.jpg"
+      ]
+    },
+    {
+      "name": "抗菌船袜五双装",
+      "price": 39.0,
+      "stock": 200,
+      "introduce": "【服饰】棉底抗菌，低帮不掉跟，一盒五色日常替换。",
+      "images": [
+        "images/010.jpg"
+      ]
+    },
+    {
+      "name": "羊毛混纺围巾",
+      "price": 89.0,
+      "stock": 75,
+      "introduce": "【服饰】柔软不扎，秋冬保暖，纯色好搭配大衣。",
+      "images": [
+        "images/011.jpg"
+      ]
+    },
+    {
+      "name": "帆布休闲鞋",
+      "price": 159.0,
+      "stock": 85,
+      "introduce": "【服饰】硫化鞋底，软布鞋面，走路轻便，黑白两色百搭。",
+      "images": [
+        "images/012.jpg"
+      ]
+    },
+    {
+      "name": "室内家居拖鞋",
+      "price": 29.0,
+      "stock": 180,
+      "introduce": "【服饰】静音软底，防滑，夏天浴室冬天卧室都能穿。",
+      "images": [
+        "images/013.jpg"
+      ]
+    },
+    {
+      "name": "轻薄羽绒服",
+      "price": 399.0,
+      "stock": 40,
+      "introduce": "【服饰】90% 白鸭绒，可压缩收纳，过渡季节当外套刚刚好。",
+      "images": [
+        "images/014.jpg"
+      ]
+    },
+    {
+      "name": "高腰A字半身裙",
+      "price": 109.0,
+      "stock": 70,
+      "introduce": "【服饰】伞状裙摆，遮肉显瘦，通勤约会都能穿。",
+      "images": [
+        "images/015.jpg"
+      ]
+    },
+    {
+      "name": "工装休闲裤",
+      "price": 169.0,
+      "stock": 65,
+      "introduce": "【服饰】多口袋设计，微锥版型，耐磨面料适合日常和短途出行。",
+      "images": [
+        "images/016.jpg"
+      ]
+    },
+    {
+      "name": "记忆棉枕头",
+      "price": 89.0,
+      "stock": 90,
+      "introduce": "【居家】慢回弹记忆棉，贴合颈曲，透气枕套可拆洗。",
+      "images": [
+        "images/017.jpg"
+      ]
+    },
+    {
+      "name": "水洗棉夏凉被",
+      "price": 199.0,
+      "stock": 55,
+      "introduce": "【居家】水洗棉被套，轻薄透气，夏天空调房盖着舒服。",
+      "images": [
+        "images/018.jpg"
+      ]
+    },
+    {
+      "name": "抽屉式收纳箱",
+      "price": 59.0,
+      "stock": 100,
+      "introduce": "【居家】加厚塑料，透明可视，衣服袜子分装都方便。",
+      "images": [
+        "images/019.jpg"
+      ]
+    },
+    {
+      "name": "大豆蜡香薰蜡烛",
+      "price": 45.0,
+      "stock": 130,
+      "introduce": "【居家】大豆蜡低烟，燃烧约 30 小时，白茶香，适合卧室。",
+      "images": [
+        "images/020.jpg"
+      ]
+    },
+    {
+      "name": "静音加湿器",
+      "price": 159.0,
+      "stock": 70,
+      "introduce": "【居家】上加水，夜间静音，缺水自动停，秋冬防干燥。",
+      "images": [
+        "images/021.jpg"
+      ]
+    },
+    {
+      "name": "法兰绒毛毯",
+      "price": 129.0,
+      "stock": 80,
+      "introduce": "【居家】双面法兰绒，不掉毛，沙发盖毯午睡毯都能用。",
+      "images": [
+        "images/022.jpg"
+      ]
+    },
+    {
+      "name": "防滑衣架20只",
+      "price": 29.0,
+      "stock": 140,
+      "introduce": "【居家】宽肩防滑，不起包，衣柜整理一套搞定。",
+      "images": [
+        "images/023.jpg"
+      ]
+    },
+    {
+      "name": "感应垃圾桶",
+      "price": 79.0,
+      "stock": 95,
+      "introduce": "【居家】挥手开盖，密封防臭，客厅厨房卫生间通用。",
+      "images": [
+        "images/024.jpg"
+      ]
+    },
+    {
+      "name": "入户地垫",
+      "price": 39.0,
+      "stock": 120,
+      "introduce": "【居家】刮泥吸水，可水洗，进门不把灰带进屋里。",
+      "images": [
+        "images/025.jpg"
+      ]
+    },
+    {
+      "name": "遮光窗帘",
+      "price": 159.0,
+      "stock": 50,
+      "introduce": "【居家】全遮光，隔热隔音，卧室午睡和投影仪都合适。",
+      "images": [
+        "images/026.jpg"
+      ]
+    },
+    {
+      "name": "床头置物架",
+      "price": 69.0,
+      "stock": 85,
+      "introduce": "【居家】免打孔，放手机水杯遥控器，床头不再乱。",
+      "images": [
+        "images/027.jpg"
+      ]
+    },
+    {
+      "name": "懒人沙发豆袋",
+      "price": 259.0,
+      "stock": 35,
+      "introduce": "【居家】高回弹颗粒，可拆洗外套，客厅阳台躺着刷剧。",
+      "images": [
+        "images/028.jpg"
+      ]
+    },
+    {
+      "name": "桌面收纳盒",
+      "price": 35.0,
+      "stock": 150,
+      "introduce": "【居家】分格设计，口红笔电线分开放，桌面立刻干净。",
+      "images": [
+        "images/029.jpg"
+      ]
+    },
+    {
+      "name": "单人电热毯",
+      "price": 119.0,
+      "stock": 60,
+      "introduce": "【居家】双档控温，过热保护，南方冬天被子先预热。",
+      "images": [
+        "images/030.jpg"
+      ]
+    },
+    {
+      "name": "衣物防尘罩",
+      "price": 25.0,
+      "stock": 160,
+      "introduce": "【居家】透明可视，大衣西装换季收纳防灰。",
+      "images": [
+        "images/031.jpg"
+      ]
+    },
+    {
+      "name": "硅藻泥脚垫",
+      "price": 49.0,
+      "stock": 110,
+      "introduce": "【居家】速干防滑，浴室门口一踩就干，不积水。",
+      "images": [
+        "images/032.jpg"
+      ]
+    },
+    {
+      "name": "液态硅胶手机壳",
+      "price": 29.0,
+      "stock": 200,
+      "introduce": "【数码】亲肤防摔，不沾指纹，按键精准，日常保护够用。",
+      "images": [
+        "images/033.jpg"
+      ]
+    },
+    {
+      "name": "编织充电线",
+      "price": 19.0,
+      "stock": 220,
+      "introduce": "【数码】Type-C 快充，编织防缠绕，车里包里各放一根。",
+      "images": [
+        "images/034.jpg"
+      ]
+    },
+    {
+      "name": "20000mAh充电宝",
+      "price": 129.0,
+      "stock": 90,
+      "introduce": "【数码】双口输出，出行应急，笔记本小电流也能撑一阵。",
+      "images": [
+        "images/035.jpg"
+      ]
+    },
+    {
+      "name": "便携蓝牙音箱",
+      "price": 159.0,
+      "stock": 75,
+      "introduce": "【数码】低音增强，IPX5 防水，野餐露营放包里就走。",
+      "images": [
+        "images/036.jpg"
+      ]
+    },
+    {
+      "name": "青轴机械键盘",
+      "price": 249.0,
+      "stock": 50,
+      "introduce": "【数码】热插拔轴体，PBT 键帽，打字段落感清晰。",
+      "images": [
+        "images/037.jpg"
+      ]
+    },
+    {
+      "name": "静音无线鼠标",
+      "price": 79.0,
+      "stock": 100,
+      "introduce": "【数码】静音按键，2.4G，办公室深夜也不吵到人。",
+      "images": [
+        "images/038.jpg"
+      ]
+    },
+    {
+      "name": "手机桌面支架",
+      "price": 25.0,
+      "stock": 180,
+      "introduce": "【数码】可调节角度，看剧直播支架，折叠收纳。",
+      "images": [
+        "images/039.jpg"
+      ]
+    },
+    {
+      "name": "降噪耳塞套装",
+      "price": 39.0,
+      "stock": 140,
+      "introduce": "【数码】睡眠学习用，柔软慢回弹，隔音日常噪音。",
+      "images": [
+        "images/040.jpg"
+      ]
+    },
+    {
+      "name": "微单相机包",
+      "price": 99.0,
+      "stock": 60,
+      "introduce": "【数码】防泼水，隔层可调，装机身加两个镜头。",
+      "images": [
+        "images/041.jpg"
+      ]
+    },
+    {
+      "name": "平板保护套",
+      "price": 69.0,
+      "stock": 80,
+      "introduce": "【数码】三折支架，休眠唤醒，通勤路上当支架用。",
+      "images": [
+        "images/042.jpg"
+      ]
+    },
+    {
+      "name": "Type-C扩展坞",
+      "price": 139.0,
+      "stock": 70,
+      "introduce": "【数码】HDMI+USB+读卡，笔记本一根线接显示器。",
+      "images": [
+        "images/043.jpg"
+      ]
+    },
+    {
+      "name": "屏幕清洁套装",
+      "price": 22.0,
+      "stock": 160,
+      "introduce": "【数码】喷雾+纤维布，手机电脑屏幕去指纹。",
+      "images": [
+        "images/044.jpg"
+      ]
+    },
+    {
+      "name": "笔记本内胆包",
+      "price": 59.0,
+      "stock": 90,
+      "introduce": "【数码】加绒防震，13-14 寸通用，塞进通勤包。",
+      "images": [
+        "images/045.jpg"
+      ]
+    },
+    {
+      "name": "车载手机支架",
+      "price": 35.0,
+      "stock": 90,
+      "introduce": "【数码】出风口夹持，单手取放，导航不挡视线。",
+      "images": [
+        "images/046.jpg"
+      ]
+    },
+    {
+      "name": "RGB氛围灯带",
+      "price": 45.0,
+      "stock": 100,
+      "introduce": "【数码】USB 供电，贴桌底电视后，晚上光线柔和。",
+      "images": [
+        "images/047.jpg"
+      ]
+    },
+    {
+      "name": "64GB U盘",
+      "price": 49.0,
+      "stock": 130,
+      "introduce": "【数码】金属壳，钥匙扣设计，拷资料备份随手带。",
+      "images": [
+        "images/048.jpg"
+      ]
+    },
+    {
+      "name": "316不锈钢保温杯",
+      "price": 89.0,
+      "stock": 110,
+      "introduce": "【厨房】316 内胆，锁温 6 小时，上班通勤一杯水。",
+      "images": [
+        "images/049.jpg"
+      ]
+    },
+    {
+      "name": "哑光马克杯",
+      "price": 39.0,
+      "stock": 150,
+      "introduce": "【厨房】400ml，杯把防烫，办公室泡茶喝咖啡。",
+      "images": [
+        "images/050.jpg"
+      ]
+    },
+    {
+      "name": "整竹砧板",
+      "price": 59.0,
+      "stock": 80,
+      "introduce": "【厨房】整竹无拼接，不易发霉，切菜切水果分开用。",
+      "images": [
+        "images/051.jpg"
+      ]
+    },
+    {
+      "name": "日式不锈钢菜刀",
+      "price": 129.0,
+      "stock": 55,
+      "introduce": "【厨房】锋利好握，切肉切片，家用一把就够。",
+      "images": [
+        "images/052.jpg"
+      ]
+    },
+    {
+      "name": "玻璃保鲜盒三件套",
+      "price": 49.0,
+      "stock": 100,
+      "introduce": "【厨房】耐热玻璃，带盖密封，冰箱加热盒都能进。",
+      "images": [
+        "images/053.jpg"
+      ]
+    },
+    {
+      "name": "防水围裙",
+      "price": 29.0,
+      "stock": 120,
+      "introduce": "【厨房】可擦拭，做饭洗碗不脏衣服。",
+      "images": [
+        "images/054.jpg"
+      ]
+    },
+    {
+      "name": "四人陶瓷餐具套装",
+      "price": 99.0,
+      "stock": 60,
+      "introduce": "【厨房】碗盘勺一套，搬家或日常替换刚刚好。",
+      "images": [
+        "images/055.jpg"
+      ]
+    },
+    {
+      "name": "手冲咖啡壶",
+      "price": 119.0,
+      "stock": 50,
+      "introduce": "【厨房】细嘴壶，新手也容易控制水流。",
+      "images": [
+        "images/056.jpg"
+      ]
+    },
+    {
+      "name": "不锈钢电热水壶",
+      "price": 79.0,
+      "stock": 85,
+      "introduce": "【厨房】1.7L，自动断电，烧水快。",
+      "images": [
+        "images/057.jpg"
+      ]
+    },
+    {
+      "name": "密封罐四件套",
+      "price": 45.0,
+      "stock": 95,
+      "introduce": "【厨房】玻璃+竹盖，装茶叶坚果零食防潮。",
+      "images": [
+        "images/058.jpg"
+      ]
+    },
+    {
+      "name": "硅胶锅铲",
+      "price": 19.0,
+      "stock": 140,
+      "introduce": "【厨房】不伤不粘锅，耐高温，洗碗方便。",
+      "images": [
+        "images/059.jpg"
+      ]
+    },
+    {
+      "name": "保温饭盒",
+      "price": 69.0,
+      "stock": 90,
+      "introduce": "【厨房】双层分隔，带汤碗，上班带饭不串味。",
+      "images": [
+        "images/060.jpg"
+      ]
+    },
+    {
+      "name": "厨房纸巾架",
+      "price": 25.0,
+      "stock": 130,
+      "introduce": "【厨房】台面或壁挂，一卷纸随手抽。",
+      "images": [
+        "images/061.jpg"
+      ]
+    },
+    {
+      "name": "调料瓶六件套",
+      "price": 32.0,
+      "stock": 110,
+      "introduce": "【厨房】控油嘴，酱油醋辣椒油分装，灶台整洁。",
+      "images": [
+        "images/062.jpg"
+      ]
+    },
+    {
+      "name": "氨基酸洗面奶",
+      "price": 59.0,
+      "stock": 100,
+      "introduce": "【个护】弱酸配方，洗完不紧绷，敏感皮肤日常用。",
+      "images": [
+        "images/063.jpg"
+      ]
+    },
+    {
+      "name": "保湿面霜",
+      "price": 89.0,
+      "stock": 80,
+      "introduce": "【个护】神经酰胺+甘油，秋冬厚涂，夏天薄涂。",
+      "images": [
+        "images/064.jpg"
+      ]
+    },
+    {
+      "name": "丝绒口红",
+      "price": 79.0,
+      "stock": 90,
+      "introduce": "【个护】哑光不拔干，日常豆沙色，一口一个好气色。",
+      "images": [
+        "images/065.jpg"
+      ]
+    },
+    {
+      "name": "补水面膜10片",
+      "price": 39.0,
+      "stock": 120,
+      "introduce": "【个护】玻尿酸补水，熬夜急救，一盒十片。",
+      "images": [
+        "images/066.jpg"
+      ]
+    },
+    {
+      "name": "软毛牙刷四支",
+      "price": 19.0,
+      "stock": 160,
+      "introduce": "【个护】万根软毛，护龈，家庭替换装。",
+      "images": [
+        "images/067.jpg"
+      ]
+    },
+    {
+      "name": "香氛洗发水",
+      "price": 49.0,
+      "stock": 100,
+      "introduce": "【个护】清爽不硅油，洗完蓬松，白茶香。",
+      "images": [
+        "images/068.jpg"
+      ]
+    },
+    {
+      "name": "滋润沐浴露",
+      "price": 42.0,
+      "stock": 110,
+      "introduce": "【个护】泡沫细腻，洗完皮肤不干，家庭装。",
+      "images": [
+        "images/069.jpg"
+      ]
+    },
+    {
+      "name": "便携护手霜",
+      "price": 29.0,
+      "stock": 150,
+      "introduce": "【个护】乳木果油，包里一支，洗手后随手涂。",
+      "images": [
+        "images/070.jpg"
+      ]
+    },
+    {
+      "name": "防晒霜 SPF50",
+      "price": 69.0,
+      "stock": 85,
+      "introduce": "【个护】清爽不搓泥，户外出行通勤都要涂。",
+      "images": [
+        "images/071.jpg"
+      ]
+    },
+    {
+      "name": "淡香水小样套装",
+      "price": 59.0,
+      "stock": 70,
+      "introduce": "【个护】四支小样，先试味道再决定正装。",
+      "images": [
+        "images/072.jpg"
+      ]
+    },
+    {
+      "name": "卸妆湿巾",
+      "price": 25.0,
+      "stock": 140,
+      "introduce": "【个护】一片卸淡妆，出差旅行应急。",
+      "images": [
+        "images/073.jpg"
+      ]
+    },
+    {
+      "name": "LED化妆镜",
+      "price": 79.0,
+      "stock": 65,
+      "introduce": "【个护】三色灯光，可折叠，宿舍化妆补光。",
+      "images": [
+        "images/074.jpg"
+      ]
+    },
+    {
+      "name": "加厚瑜伽垫",
+      "price": 69.0,
+      "stock": 90,
+      "introduce": "【运动】10mm 加厚，防滑无味，在家跟练够用。",
+      "images": [
+        "images/075.jpg"
+      ]
+    },
+    {
+      "name": "包胶哑铃一对",
+      "price": 129.0,
+      "stock": 50,
+      "introduce": "【运动】3kg 一对，包胶不伤地板，力量入门。",
+      "images": [
+        "images/076.jpg"
+      ]
+    },
+    {
+      "name": "计数跳绳",
+      "price": 29.0,
+      "stock": 130,
+      "introduce": "【运动】轴承顺滑，计数器看运动量，室内也能跳。",
+      "images": [
+        "images/077.jpg"
+      ]
+    },
+    {
+      "name": "运动水壶",
+      "price": 39.0,
+      "stock": 120,
+      "introduce": "【运动】挤水设计，骑行健身，防漏。",
+      "images": [
+        "images/078.jpg"
+      ]
+    },
+    {
+      "name": "运动护腕",
+      "price": 19.0,
+      "stock": 150,
+      "introduce": "【运动】弹力加压，羽毛球健身护腕关节。",
+      "images": [
+        "images/079.jpg"
+      ]
+    },
+    {
+      "name": "防雾泳镜",
+      "price": 45.0,
+      "stock": 80,
+      "introduce": "【运动】硅胶镜框，防雾镀膜，游泳馆常用。",
+      "images": [
+        "images/080.jpg"
+      ]
+    },
+    {
+      "name": "羽毛球拍单拍",
+      "price": 89.0,
+      "stock": 60,
+      "introduce": "【运动】全碳素入门拍，送球和手胶，周末打球。",
+      "images": [
+        "images/081.jpg"
+      ]
+    },
+    {
+      "name": "骑行手套",
+      "price": 49.0,
+      "stock": 70,
+      "introduce": "【运动】掌心加厚，透气，短途骑行减震。",
+      "images": [
+        "images/082.jpg"
+      ]
+    },
+    {
+      "name": "跑步手机臂包",
+      "price": 35.0,
+      "stock": 100,
+      "introduce": "【运动】触屏可视，夜跑反光条，手机钥匙一起装。",
+      "images": [
+        "images/083.jpg"
+      ]
+    },
+    {
+      "name": "筋膜球",
+      "price": 22.0,
+      "stock": 140,
+      "introduce": "【运动】花生球，放松肩颈脚底，久坐缓解。",
+      "images": [
+        "images/084.jpg"
+      ]
+    },
+    {
+      "name": "拉力绳套装",
+      "price": 59.0,
+      "stock": 90,
+      "introduce": "【运动】多档阻力，出门旅店也能练。",
+      "images": [
+        "images/085.jpg"
+      ]
+    },
+    {
+      "name": "速干运动毛巾",
+      "price": 25.0,
+      "stock": 110,
+      "introduce": "【运动】吸汗快干，健身房包里常备。",
+      "images": [
+        "images/086.jpg"
+      ]
+    },
+    {
+      "name": "硬面笔记本",
+      "price": 19.0,
+      "stock": 180,
+      "introduce": "【文具】A5 横线，80 张，会议记录手账都合适。",
+      "images": [
+        "images/087.jpg"
+      ]
+    },
+    {
+      "name": "中性笔12支",
+      "price": 16.0,
+      "stock": 200,
+      "introduce": "【文具】0.5mm 黑笔，写字顺滑，办公室消耗品。",
+      "images": [
+        "images/088.jpg"
+      ]
+    },
+    {
+      "name": "双肩电脑包",
+      "price": 159.0,
+      "stock": 70,
+      "introduce": "【箱包】15.6 寸仓，防泼水，通勤出差背一天不累。",
+      "images": [
+        "images/089.jpg"
+      ]
+    },
+    {
+      "name": "斜挎小包",
+      "price": 79.0,
+      "stock": 90,
+      "introduce": "【箱包】轻便，装手机钥匙卡，出门不背大包。",
+      "images": [
+        "images/090.jpg"
+      ]
+    },
+    {
+      "name": "短款钱包",
+      "price": 99.0,
+      "stock": 80,
+      "introduce": "【箱包】多层卡位，零钱袋，口袋里不鼓。",
+      "images": [
+        "images/091.jpg"
+      ]
+    },
+    {
+      "name": "旅行洗漱包",
+      "price": 39.0,
+      "stock": 80,
+      "introduce": "【箱包】防水，悬挂设计，酒店洗手台挂着就能用。",
+      "images": [
+        "images/092.jpg"
+      ]
+    },
+    {
+      "name": "名片卡包",
+      "price": 29.0,
+      "stock": 120,
+      "introduce": "【箱包】轻薄，放门禁卡银行卡，前口袋刚刚好。",
+      "images": [
+        "images/093.jpg"
+      ]
+    },
+    {
+      "name": "折叠购物袋",
+      "price": 15.0,
+      "stock": 200,
+      "introduce": "【箱包】收纳成口袋大小，超市买菜随手展开。",
+      "images": [
+        "images/094.jpg"
+      ]
+    },
+    {
+      "name": "运动腰包",
+      "price": 35.0,
+      "stock": 100,
+      "introduce": "【箱包】贴身，夜跑放钥匙耳机，不晃。",
+      "images": [
+        "images/095.jpg"
+      ]
+    },
+    {
+      "name": "2026台历",
+      "price": 22.0,
+      "stock": 90,
+      "introduce": "【文具】桌面立式，记事格子大，办公室一眼看到日期。",
+      "images": [
+        "images/096.jpg"
+      ]
+    },
+    {
+      "name": "黄铜书签",
+      "price": 12.0,
+      "stock": 160,
+      "introduce": "【文具】黄铜片，阅读不折页，礼物也很合适。",
+      "images": [
+        "images/097.jpg"
+      ]
+    },
+    {
+      "name": "文件夹6个装",
+      "price": 18.0,
+      "stock": 130,
+      "introduce": "【文具】A4 分类，试卷合同分色管理。",
+      "images": [
+        "images/098.jpg"
+      ]
+    },
+    {
+      "name": "家用螺丝刀套装",
+      "price": 45.0,
+      "stock": 85,
+      "introduce": "【工具】多批头，修眼镜家具小家电，家里常备。",
+      "images": [
+        "images/099.jpg"
+      ]
+    },
+    {
+      "name": "迷你桌面风扇",
+      "price": 59.0,
+      "stock": 100,
+      "introduce": "【居家】USB 供电，三档，夏天对着键盘吹刚刚好。",
+      "images": [
+        "images/100.jpg"
+      ]
+    }
+  ]
+}

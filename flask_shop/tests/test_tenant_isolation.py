@@ -22,12 +22,6 @@ def _names(data):
     return set()
 
 
-def _ship_nos(data):
-    items = data.get('data') if isinstance(data, dict) else data
-    if isinstance(items, list):
-        return {d.get('shipment_no') for d in items if isinstance(d, dict)}
-    return set()
-
 
 def _order_nos(data):
     items = data.get('data') if isinstance(data, dict) else data
@@ -88,15 +82,6 @@ def test_role_list_isolation(api):
     assert 'B-角色-唯一' in nb and 'A-角色-唯一' not in nb
 
 
-def test_shipment_list_isolation(api):
-    c, s = api['client'], api['seed']
-    a = c.get('/shipments/', headers={'token': s['token_a']}).get_json()
-    b = c.get('/shipments/', headers={'token': s['token_b']}).get_json()
-    assert a['status'] == 200 and b['status'] == 200
-    sa, sb = _ship_nos(a), _ship_nos(b)
-    assert 'A-SHIP-1' in sa and 'B-SHIP-1' not in sa
-    assert 'B-SHIP-1' in sb and 'A-SHIP-1' not in sb
-
 
 def test_freight_list_isolation(api):
     c, s = api['client'], api['seed']
@@ -121,11 +106,6 @@ def test_cross_tenant_order_detail_404(api):
     rv = c.get(f"/order/{s['order_b'].id}/", headers={'token': s['token_a']})
     assert rv.get_json()['status'] == 404
 
-
-def test_cross_tenant_shipment_detail_404(api):
-    c, s = api['client'], api['seed']
-    rv = c.get(f"/shipment/{s['shipment_b'].id}/", headers={'token': s['token_a']})
-    assert rv.get_json()['status'] == 404
 
 
 # ---------- 鉴权边界 ----------

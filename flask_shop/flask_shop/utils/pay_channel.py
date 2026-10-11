@@ -44,7 +44,8 @@ class MockChannel(BaseChannel):
     name = 'mock'
 
     def prepay(self, payment, order, **kwargs):
-        if not current_app.config.get('ALLOW_MOCK_PAY', True):
+        # fail-closed：配置缺失时一律拒绝，避免误放行 mock
+        if not current_app.config.get('ALLOW_MOCK_PAY', False):
             raise PayChannelError('当前环境禁止 mock 支付', 403)
         payment.status = 'paying'
         return {

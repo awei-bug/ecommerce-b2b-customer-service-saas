@@ -1,11 +1,21 @@
+# -*- coding: utf-8 -*-
+"""电商平台配置。"""
 import os
 
-# 尝试加载 .env（无 python-dotenv 时静默跳过）
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
+
+
+def _env_bool(name, default='0'):
+    return os.getenv(name, default).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _env_list(name, default=''):
+    raw = os.getenv(name, default) or ''
+    return [x.strip() for x in raw.split(',') if x.strip()]
 
 
 class Config:
@@ -15,87 +25,169 @@ class Config:
     MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', '123')
     MYSQL_HOST = os.getenv('MYSQL_HOST', '127.0.0.1')
     MYSQL_PORT = int(os.getenv('MYSQL_PORT', '3306'))
-    MYSQL_DB = os.getenv('MYSQL_DB', 'flask_shop_saas')
+    MYSQL_DB = os.getenv('MYSQL_DB', 'flask_shop')
     MYSQL_CHARSET = 'utf8mb4'
 
-    SQLALCHEMY_DATABASE_URI = (
-        f'{MYSQL_DIALECT}+{MYSQL_DRIVER}://{MYSQL_USERNAME}:{MYSQL_PASSWORD}'
-        f'@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}?charset={MYSQL_CHARSET}'
-    )
+    _db_url = os.getenv('DATABASE_URL', '').strip()
+    if _db_url:
+        SQLALCHEMY_DATABASE_URI = _db_url
+    else:
+        SQLALCHEMY_DATABASE_URI = (
+            f'{MYSQL_DIALECT}+{MYSQL_DRIVER}://{MYSQL_USERNAME}:{MYSQL_PASSWORD}'
+            f'@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}?charset={MYSQL_CHARSET}'
+        )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # 固定密钥：必须来自环境变量，禁止 os.urandom（否则重启后全部 token 失效）
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-only-secret-key-change-in-production')
-
     JSON_AS_ASCII = False
     RESTFUL_JSON = {'ensure_ascii': False}
-
     JWT_EXPIRATION_DELTA = int(os.getenv('JWT_EXPIRATION_DELTA', str(60 * 60 * 24)))
 
-    ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif']
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    UPLOAD_FOLDER = os.path.join(BASE_DIR, 'flask_shop', 'static', 'upload')
-
-    # ---- 支付 ----
-    # mock | wechat；生产建议 wechat，且 ALLOW_MOCK_PAY=0
-    PAY_DEFAULT_CHANNEL = os.getenv('PAY_DEFAULT_CHANNEL', 'mock').lower()
-    ALLOW_MOCK_PAY = os.getenv('ALLOW_MOCK_PAY', '1') == '1'
-
-    # 微信直连商户（密钥勿提交仓库，只放 .env / 服务器环境变量）
-    WECHAT_MCH_ID = os.getenv('WECHAT_MCH_ID', '')
-    WECHAT_MCH_SERIAL_NO = os.getenv('WECHAT_MCH_SERIAL_NO', '')
-    WECHAT_MCH_PRIVATE_KEY_PATH = os.getenv('WECHAT_MCH_PRIVATE_KEY_PATH', '')
-    WECHAT_APP_ID = os.getenv('WECHAT_APP_ID', '')
-    WECHAT_API_V3_KEY = os.getenv('WECHAT_API_V3_KEY', '')
-    WECHAT_NOTIFY_URL = os.getenv('WECHAT_NOTIFY_URL', '')
-    WECHAT_PAY_TRADE_TYPE = os.getenv('WECHAT_PAY_TRADE_TYPE', 'native')  # native|h5|jsapi
-    # 平台证书缓存目录（wechatpayv3 自动下载）
-    WECHAT_CERT_DIR = os.getenv(
-        'WECHAT_CERT_DIR',
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), '.wechat_certs'),
+    CORS_ORIGINS = _env_list(
+        'CORS_ORIGINS',
+        'http://localhost:8080,http://127.0.0.1:8080,http://localhost:8081,http://127.0.0.1:8081,http://localhost:5173,http://127.0.0.1:5173',
     )
-    # JSAPI 可配置默认 openid；生产应由用户微信授权获得
-    WECHAT_PAYER_OPENID = os.getenv('WECHAT_PAYER_OPENID', '')
 
-    # ---- C 端短信登录（骨架）----
-    # 开发默认打开：固定验证码，发送接口可返回 dev_code
-    SMS_DEV_MODE = os.getenv('SMS_DEV_MODE', '1') == '1'
+    COMPANY_SHORT_NAME = os.getenv('COMPANY_SHORT_NAME', '云购商城')
+    DEFAULT_TENANT_SLUG = os.getenv('DEFAULT_TENANT_SLUG', 'demo')
+    DEFAULT_TENANT_NAME = os.getenv('DEFAULT_TENANT_NAME', '演示旗舰店')
+
+    ALLOW_MOCK_PAY = _env_bool('ALLOW_MOCK_PAY', '1')
+    SMS_DEV_MODE = _env_bool('SMS_DEV_MODE', '1')
     SMS_DEV_CODE = os.getenv('SMS_DEV_CODE', '123456')
+    SMS_DEV_COOLDOWN = int(os.getenv('SMS_DEV_COOLDOWN', '10'))
+    SMS_COOLDOWN = int(os.getenv('SMS_COOLDOWN', '60'))
+    SMS_PROVIDER = os.getenv('SMS_PROVIDER', 'console')
+    SMS_HTTP_URL = os.getenv('SMS_HTTP_URL', '')
+    SMS_HTTP_TOKEN = os.getenv('SMS_HTTP_TOKEN', '')
     SMS_CODE_EXPIRE_MINUTES = int(os.getenv('SMS_CODE_EXPIRE_MINUTES', '10'))
+    PAY_DEFAULT_CHANNEL = os.getenv('PAY_DEFAULT_CHANNEL', 'mock')
+    PLATFORM_BOOTSTRAP_KEY = os.getenv('PLATFORM_BOOTSTRAP_KEY', '')
+    PUBLIC_BASE_URL = os.getenv('PUBLIC_BASE_URL', 'http://127.0.0.1:5000')
+    CONTENT_PLATFORM_CONVERSION_WEBHOOK = os.getenv('CONTENT_PLATFORM_CONVERSION_WEBHOOK', '')
+    CONTENT_PLATFORM_WEBHOOK_TOKEN = os.getenv('CONTENT_PLATFORM_WEBHOOK_TOKEN', '')
+    # 内容平台直推成品包：'slug1:token1,slug2:token2'，为空则关闭该通道
+    INTEGRATION_TOKENS = os.getenv('INTEGRATION_TOKENS', '')
+    # 单次直推允许的最大商品数，防止一次灌爆库存/配额
+    INTEGRATION_MAX_PRODUCTS = int(os.getenv('INTEGRATION_MAX_PRODUCTS', '200'))
+    # 商品知识数据中心：内容平台写入，电商侧拉取上架与客服检索
+    DATA_HUB_URL = os.getenv('DATA_HUB_URL', '')
+    DATA_HUB_TOKEN = os.getenv('DATA_HUB_TOKEN', '')
+    DATA_HUB_TENANT_SLUG = os.getenv('DATA_HUB_TENANT_SLUG', '')
+    DATA_HUB_TIMEOUT = int(os.getenv('DATA_HUB_TIMEOUT', '10'))
+    # 同步时是否把图片落到本地 static（默认直接用内容平台 URL）
+    DATA_HUB_FETCH_IMAGES = _env_bool('DATA_HUB_FETCH_IMAGES', '0')
+    TENANT_STRICT = _env_bool('TENANT_STRICT', '0')
+    MAX_UPLOAD_IMAGE_BYTES = int(os.getenv('MAX_UPLOAD_IMAGE_BYTES', str(5 * 1024 * 1024)))
+    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+    # 待支付订单超时（分钟）；0 表示关闭自动关单
+    ORDER_PENDING_TIMEOUT_MINUTES = int(os.getenv('ORDER_PENDING_TIMEOUT_MINUTES', '30'))
+    SUPPORT_BASELINE_MINUTES = int(os.getenv('SUPPORT_BASELINE_MINUTES', '6'))
+    LOGIN_ACCOUNT_FAILURE_LIMIT = int(os.getenv('LOGIN_ACCOUNT_FAILURE_LIMIT', '5'))
+    LOGIN_IP_FAILURE_LIMIT = int(os.getenv('LOGIN_IP_FAILURE_LIMIT', '20'))
+    LOGIN_LOCK_MINUTES = int(os.getenv('LOGIN_LOCK_MINUTES', '15'))
+
+    # Agnes AI 多模态网关（密钥只放服务端环境变量）
+    AGNES_ENABLED = _env_bool('AGNES_ENABLED', '1')
+    AGNES_BASE_URL = os.getenv('AGNES_BASE_URL', 'https://apihub.agnes-ai.com/v1')
+    AGNES_TEXT_MODEL = os.getenv('AGNES_TEXT_MODEL', 'agnes-3.0-flash')
+    AGNES_IMAGE_MODEL = os.getenv('AGNES_IMAGE_MODEL', 'agnes-image-2.5-flash')
+    AGNES_VIDEO_MODEL = os.getenv('AGNES_VIDEO_MODEL', 'agnes-video-2.5-flash')
+
+    WEAK_SECRETS = frozenset({
+        '',
+        'dev-only-secret-key-change-in-production',
+        'change-me-to-a-long-random-string',
+        'secret',
+        '123456',
+    })
 
 
 class DevelopmentConfig(Config):
     DEBUG = True
+    ALLOW_MOCK_PAY = True
+    SMS_DEV_MODE = _env_bool('SMS_DEV_MODE', '1')
 
 
 class ProductionConfig(Config):
     DEBUG = False
-    # 私有化无官方支付：默认不走自动 mock 成功；channel 可用 mock 占位，收款靠「标记已付款」
-    ALLOW_MOCK_PAY = os.getenv('ALLOW_MOCK_PAY', '0') == '1'
-    PAY_DEFAULT_CHANNEL = os.getenv('PAY_DEFAULT_CHANNEL', 'mock').lower()
-    SMS_DEV_MODE = os.getenv('SMS_DEV_MODE', '0') == '1'
+    ALLOW_MOCK_PAY = _env_bool('ALLOW_MOCK_PAY', '0')
+    SMS_DEV_MODE = _env_bool('SMS_DEV_MODE', '0')
 
     @classmethod
     def validate(cls):
-        if cls.SECRET_KEY in (None, '', 'dev-only-secret-key-change-in-production', 'change-me-to-a-long-random-string'):
-            raise RuntimeError('生产环境必须设置足够长的随机 SECRET_KEY')
+        errors = []
+        secret = cls.SECRET_KEY or ''
+        if secret in cls.WEAK_SECRETS or len(secret) < 32:
+            errors.append('生产环境必须设置长度>=32 的随机 SECRET_KEY')
+        if '*' in (cls.CORS_ORIGINS or []):
+            errors.append('生产环境必须配置明确的 CORS_ORIGINS 白名单（禁止 *）')
+        if (not cls.CORS_ORIGINS) and not (_env_bool('PRIVATE_DEPLOY', '0')):
+            errors.append('生产环境必须配置 CORS_ORIGINS，或设置 PRIVATE_DEPLOY=1（同域反代/内网）')
         if cls.ALLOW_MOCK_PAY:
-            # 允许启动但强烈不推荐；打日志由应用侧处理
+            errors.append('生产环境必须 ALLOW_MOCK_PAY=0（禁止模拟支付对外成功）')
+        if cls.SMS_DEV_MODE:
+            errors.append('生产环境必须 SMS_DEV_MODE=0（禁止固定验证码）')
+        pub = (cls.PUBLIC_BASE_URL or '').lower()
+        allow_local = _env_bool('PRIVATE_DEPLOY', '0') or _env_bool('ALLOW_LOCALHOST_PUBLIC_URL', '0')
+        if (not allow_local) and ('localhost' in pub or '127.0.0.1' in pub):
+            errors.append('生产环境 PUBLIC_BASE_URL 不应为 localhost（内网私有化可设 PRIVATE_DEPLOY=1）')
+        if not (cls.CORS_ORIGINS or []) and not allow_local:
+            # 空 CORS 在同域 Nginx 反代时尚可；裸 API 对外时必须配
             pass
-        if cls.PAY_DEFAULT_CHANNEL == 'wechat':
-            # 仅检查是否误开 wechat 却无任何配置（不强制，避免未配证书无法启动）
-            pass
+        if not cls._db_url:
+            db_password = cls.MYSQL_PASSWORD or ''
+            if db_password in ('', '123', 'change-me', 'change-me-db-password', 'root-change-me') or len(db_password) < 12:
+                errors.append('生产环境必须设置长度>=12的数据库密码')
+        if not cls.SMS_DEV_MODE:
+            provider = (cls.SMS_PROVIDER or '').strip().lower()
+            if provider in ('', 'console', 'log', 'stdout'):
+                errors.append('生产环境必须配置真实 SMS_PROVIDER（不能使用 console）')
+            if provider in ('http', 'webhook', 'custom') and not (cls.SMS_HTTP_URL or '').strip():
+                errors.append('SMS_PROVIDER=http 时必须配置 SMS_HTTP_URL')
+        if cls.LOGIN_ACCOUNT_FAILURE_LIMIT < 3 or cls.LOGIN_LOCK_MINUTES < 1:
+            errors.append('登录防爆破阈值配置不安全')
+        key = cls.PLATFORM_BOOTSTRAP_KEY or ''
+        if (not key) or key in ('dev-platform-key-change-me',) or len(key) < 16:
+            errors.append('生产环境必须设置足够强度的 PLATFORM_BOOTSTRAP_KEY')
+        if errors:
+            raise RuntimeError('配置校验失败: ' + '; '.join(errors))
 
 
-class TestingConfig(Config):
+class TestConfig(Config):
+    DEBUG = True
     TESTING = True
-    MYSQL_DB = os.getenv('MYSQL_DB', 'flask_shop_saas_test')
     ALLOW_MOCK_PAY = True
-    PAY_DEFAULT_CHANNEL = 'mock'
+    SMS_DEV_MODE = True
+    # 固定测试值，避免本机 shell / .env.prod 污染（如超时 1440 分钟）
+    ORDER_PENDING_TIMEOUT_MINUTES = 30
+    TENANT_STRICT = False
+    SQLALCHEMY_DATABASE_URI = os.getenv('TEST_DATABASE_URL', 'sqlite:///:memory:')
+
+
+# 兼容旧名
+TestingConfig = TestConfig
+
+class SampleConfig(ProductionConfig):
+    """本机样板店：接近生产，允许开发验证码便于演示。"""
+    DEBUG = False
+    TESTING = False
+    ALLOW_MOCK_PAY = False
+    SMS_DEV_MODE = _env_bool('SMS_DEV_MODE', '1')
+
+    @classmethod
+    def validate(cls):
+        errors = []
+        secret = cls.SECRET_KEY or ''
+        if secret in cls.WEAK_SECRETS or len(secret) < 32:
+            errors.append('样板店请设置长度>=32 的 SECRET_KEY（deploy/.env.prod）')
+        if errors:
+            raise RuntimeError('配置校验失败: ' + '; '.join(errors))
 
 
 config_map = {
     'develop': DevelopmentConfig,
     'product': ProductionConfig,
-    'test': TestingConfig,
+    'test': TestConfig,
+    'sample': SampleConfig,
 }

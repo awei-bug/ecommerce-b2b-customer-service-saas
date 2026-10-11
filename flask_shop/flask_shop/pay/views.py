@@ -59,6 +59,11 @@ def mark_payment_success(payment, transaction_id=None, raw_notify=None, commit=T
     transit_order(order, PAID)
     if commit:
         db.session.commit()
+        try:
+            from flask_shop.utils.growth_webhook import emit_order_paid_conversion
+            emit_order_paid_conversion(order, payment)
+        except Exception as error:
+            current_app.logger.warning('growth conversion emit failed: %s', error)
     return payment, True
 
 
@@ -96,6 +101,10 @@ def create_payment():
     body = request.get_json(silent=True) or {}
     order_id = body.get('order_id')
     channel_name = (body.get('channel') or get_default_channel_name()).lower()
+    # 安全闸门（fail-closed）：mock 渠道仅当显式开启 ALLOW_MOCK_PAY 才可用。
+    # 防止生产环境误用 mock 导致订单「假支付成功」。
+    if channel_name == 'mock' and not current_app.config.get('ALLOW_MOCK_PAY', False):
+        return {'status': 403, 'msg': '当前环境禁止 mock 支付，请配置真实支付渠道或显式开启 ALLOW_MOCK_PAY'}
     if not order_id:
         return {'status': 400, 'msg': 'order_id 必填'}
 

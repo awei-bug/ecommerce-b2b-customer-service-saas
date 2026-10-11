@@ -1,0 +1,30 @@
+{
+  "publish": true,
+  "products": [
+    {
+      "name": "示例纯棉T恤",
+      "price": 89,
+      "stock": 30,
+      "introduce": "舒适透气，适合日常穿着。UI 把主图放进 images/ 即可。",
+      "images": [
+        "images/tshirt.png"
+      ]
+    },
+    {
+      "name": "示例帆布袋",
+      "price": 29,
+      "stock": 50,
+      "introduce": "环保帆布，可重复使用。",
+      "images": [
+        "images/bag.png"
+      ]
+    },
+    {
+      "name": "缺价格不会上架",
+      "introduce": "这条没有 price，导入时会被跳过，用于演示校验。",
+      "images": [
+        "images/tshirt.png"
+      ]
+    }
+  ]
+}

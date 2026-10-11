@@ -1,0 +1,114 @@
+html[data-theme="retail"] {
+}
+/* 零售小店默认皮肤：暖纸感 + 苔绿主色 + 琥珀价格 */
+:root {
+  --bg: #f6f1ea;
+  --bg-elevated: #fffdf9;
+  --text: #1c1917;
+  --text-secondary: #57534e;
+  --muted: #a8a29e;
+  --line: #e7e0d6;
+  --brand: #0f766e;
+  --brand-deep: #115e59;
+  --brand-soft: #ccfbf1;
+  --accent: #c2410c;
+  --accent-soft: #ffedd5;
+  --success: #047857;
+  --warning: #b45309;
+  --danger: #b91c1c;
+  --radius: 16px;
+  --radius-sm: 12px;
+  --shadow: 0 1px 2px rgba(28, 25, 23, 0.04), 0 12px 32px rgba(28, 25, 23, 0.06);
+  --shadow-hover: 0 16px 40px rgba(28, 25, 23, 0.12);
+  --header-h: 68px;
+  --content-max: 1120px;
+  --font: 'DM Sans', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --price: #c2410c;
+  --trust-bar: #0f766e;
+}
+
+html, body, #app {
+  background:
+    radial-gradient(900px 420px at 90% -15%, rgba(15, 118, 110, 0.10), transparent 55%),
+    radial-gradient(700px 380px at -5% 15%, rgba(194, 65, 12, 0.06), transparent 50%),
+    var(--bg) !important;
+  color: var(--text);
+  font-family: var(--font);
+}
+
+.app-header {
+  background: rgba(255, 253, 249, 0.88) !important;
+  border-bottom: 1px solid var(--line) !important;
+  backdrop-filter: blur(14px) saturate(1.15);
+}
+
+.brand h1 { color: var(--text) !important; letter-spacing: -0.02em; }
+.brand .sub { color: var(--brand) !important; font-weight: 600; }
+.brand .mark {
+  background: linear-gradient(145deg, var(--brand), var(--brand-deep)) !important;
+  color: #ecfdf5 !important;
+  box-shadow: 0 8px 20px rgba(15, 118, 110, 0.25);
+}
+
+.trust-bar { background: var(--trust-bar) !important; }
+.nav a.router-link-active {
+  color: var(--brand) !important;
+  font-weight: 700;
+}
+
+.btn.primary, button.btn.primary {
+  background: linear-gradient(180deg, #0d9488, var(--brand-deep)) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: 0 8px 18px rgba(15, 118, 110, 0.28);
+}
+.btn.primary:hover { filter: brightness(1.05); }
+.btn.ghost {
+  border: 1px solid var(--line) !important;
+  background: var(--bg-elevated) !important;
+  color: var(--text) !important;
+}
+
+.page-card, .product-card, .order-card, .login-card {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--line) !important;
+  box-shadow: var(--shadow) !important;
+  border-radius: var(--radius) !important;
+}
+.product-card:hover { box-shadow: var(--shadow-hover) !important; transform: translateY(-2px); }
+
+.price, .amt, .sum-row strong {
+  color: var(--price) !important;
+  font-weight: 800 !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.store-hero {
+  background:
+    radial-gradient(420px 180px at 8% 0%, rgba(15, 118, 110, 0.14), transparent 60%),
+    radial-gradient(320px 160px at 100% 100%, rgba(194, 65, 12, 0.08), transparent 55%),
+    var(--bg-elevated) !important;
+  border-color: var(--line) !important;
+}
+.aside-card {
+  background: linear-gradient(180deg, #fff, #f0fdfa) !important;
+  border-color: #99f6e4 !important;
+}
+.aside-item strong { color: var(--brand) !important; }
+
+.stock-badge { background: rgba(15, 118, 110, 0.92) !important; }
+.badge {
+  background: var(--brand-soft) !important;
+  color: var(--brand-deep) !important;
+  border: 1px solid #99f6e4;
+}
+
+.app-footer {
+  background: #efe8de !important;
+  border-top: 1px solid var(--line) !important;
+}
+.foot-brand strong { color: var(--text) !important; }
+
+.tag, .status-tag {
+  border-radius: 999px !important;
+}

@@ -1,13 +1,13 @@
 <template>
   <div class="page checkout-page">
     <button class="back" type="button" @click="$router.back()">← 返回</button>
-    <h2 class="page-h">确认订单</h2>
+    <h2 class="page-h fx-rise">确认订单</h2>
 
     <div v-if="loading" class="empty">加载中…</div>
     <div v-else-if="error" class="empty error">{{ error }}</div>
     <div v-else class="layout">
       <div class="main-col">
-        <section class="page-card">
+        <section class="page-card reveal">
           <div class="card-h">收货信息</div>
           <div v-if="addresses.length" class="addr-list">
             <label
@@ -39,7 +39,7 @@
           </div>
         </section>
 
-        <section class="page-card" v-if="product">
+        <section class="page-card reveal" v-if="product">
           <div class="card-h">商品信息</div>
           <div class="goods">
             <div class="g-name">{{ product.name }}</div>
@@ -51,7 +51,12 @@
         </section>
       </div>
 
-      <aside class="side-col page-card">
+
+        <section class="page-card pay-guide-card">
+          <PayGuidePanel compact />
+        </section>
+
+        <aside class="side-col page-card reveal delay-2">
         <div class="card-h">应付合计</div>
         <div class="row">
           <span>商品金额</span>
@@ -61,20 +66,25 @@
           <span>运费{{ freightName ? `（${freightName}）` : '' }}</span>
           <span>{{ freightAmount > 0 ? `￥${formatPrice(freightAmount)}` : '包邮' }}</span>
         </div>
+        <div class="row" v-if="discountAmount > 0">
+          <span>{{ couponLabel || '优惠' }}</span>
+          <span class="off">-￥{{ formatPrice(discountAmount) }}</span>
+        </div>
         <div class="row strong">
           <span>实付</span>
           <span class="price">￥{{ formatPrice(payAmount) }}</span>
         </div>
-        <div class="pay-guide" v-if="payGuide">
+        <p v-if="!hasPayQr" class="tip err">店主尚未上传收款码，暂时不能提交订单。请联系店主。</p>
+        <div class="pay-guide" v-if="false && payGuide">
           <div class="card-h small">付款说明</div>
           <pre class="guide-text">{{ payGuide }}</pre>
         </div>
-        <button class="btn primary submit" type="button" :disabled="submitting" @click="submit">
-          {{ submitting ? '提交中…' : '提交订单' }}
+        <button class="btn primary submit" type="button" :disabled="submitting || !hasPayQr" @click="submit">
+          {{ !hasPayQr ? '暂不可支付' : (submitting ? '提交中…' : '提交订单并去付款') }}
         </button>
         <p class="tip">
-          提交后请按上方说明完成付款；商家确认到账后会更新为「已付款」并安排发货。
-          <template v-if="allowDevMock">（开发环境仍可在结果页使用模拟支付）</template>
+          提交后将显示收款码：微信扫码付款，备注订单号即可。
+
         </p>
       </aside>
     </div>
@@ -82,6 +92,8 @@
 </template>
 
 <script setup>
+import { shop } from '@/utils/shop'
+import PayGuidePanel from '@/components/PayGuidePanel.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -108,6 +120,10 @@ const savingAddr = ref(false)
 const submitting = ref(false)
 const freightAmount = ref(0)
 const freightName = ref('')
+const discountAmount = ref(0)
+const couponLabel = ref('')
+const couponId = ref(null)
+const hasPayQr = ref(true)
 const payGuide = ref('')
 const allowDevMock = ref(false)
 
@@ -119,7 +135,10 @@ const form = reactive({
 })
 
 const goodsAmount = computed(() => Number(product.value?.price || 0) * qty.value)
-const payAmount = computed(() => goodsAmount.value + Number(freightAmount.value || 0))
+const payAmount = computed(() => {
+  const n = goodsAmount.value + Number(freightAmount.value || 0) - Number(discountAmount.value || 0)
+  return n > 0 ? n : 0
+})
 
 function formatPrice(n) {
   return Number(n || 0).toFixed(2)
@@ -139,6 +158,9 @@ async function refreshFreight() {
     if (res.status === 200) {
       freightAmount.value = Number(res.data?.freight_amount || 0)
       freightName.value = res.data?.template?.name || ''
+      discountAmount.value = Number(res.data?.discount_amount || 0)
+      couponLabel.value = res.data?.coupon?.name || ''
+      couponId.value = res.data?.coupon?.id || null
     }
   } catch {
     freightAmount.value = 0
@@ -176,6 +198,7 @@ async function load() {
     }
     if (shopRes?.status === 200) {
       payGuide.value = shopRes.data?.pay_guide || ''
+      hasPayQr.value = !!(shopRes.data?.has_pay_qr || shopRes.data?.pay_qr_wechat || shopRes.data?.pay_qr_alipay)
     }
     // 开发环境：仅当后端允许 mock 时才自动模拟支付
     allowDevMock.value = import.meta.env.DEV === true
@@ -239,43 +262,23 @@ async function submit() {
       finalAddressId = res.data.id
     }
 
+    if (!hasPayQr.value) {
+      throw new Error('店主尚未上传收款码，无法提交订单')
+    }
     const orderRes = await createOrder({
       address_id: finalAddressId,
       items: [{ pid: product.value.id, number: qty.value }],
+      coupon_id: couponId.value,
     })
     if (orderRes.status !== 200) throw new Error(orderRes.msg || '下单失败')
     const order = orderRes.data
-    const amount = order.price
-
-    // 商用默认：只下单，不自动 mock 支付
-    // 开发环境若后端允许 mock，可在结果页提示继续；此处不再默认自动假付成功
-    if (allowDevMock.value && route.query.auto_mock === '1') {
-      const payCreate = await createPayment({ order_id: order.id, channel: 'mock' })
-      if (payCreate.status === 200) {
-        const outTradeNo = payCreate.data.payment.out_trade_no
-        const payRes = await mockPay({ out_trade_no: outTradeNo })
-        if (payRes.status === 200) {
-          router.replace({
-            path: '/pay-result',
-            query: {
-              order_id: order.id,
-              order_no: order.order_no,
-              status: 'success',
-              amount,
-            },
-          })
-          return
-        }
-      }
-    }
-
     router.replace({
-      path: '/pay-result',
+      path: '/pay',
       query: {
         order_id: order.id,
         order_no: order.order_no,
-        status: 'await_manual',
-        amount,
+        amount: order.price,
+        name: product.value.name || '',
       },
     })
   } catch (e) {
@@ -335,7 +338,7 @@ onMounted(load)
   color: #595959;
   background: #fffbe6;
   border: 1px dashed #ffd591;
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 10px;
   max-height: 140px;
   overflow: auto;
@@ -349,7 +352,7 @@ onMounted(load)
   gap: 10px;
   align-items: flex-start;
   border: 1px solid #eef0f4;
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 12px;
   cursor: pointer;
 }
@@ -380,7 +383,7 @@ onMounted(load)
 }
 .form-grid input {
   border: 1px solid #e5e6eb;
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 10px 12px;
   font-size: 14px;
 }
@@ -430,4 +433,25 @@ onMounted(load)
     grid-template-columns: 1fr;
   }
 }
+
+.pay-guide-card { margin-top: 12px; }
+.pay-guide-text {
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #134e4a;
+  background: #f0fdfa;
+  border-radius: 12px;
+  padding: 12px;
+  margin: 0 0 8px;
+  border: 1px dashed #5eead4;
+}
+.pay-tip { margin: 0 0 4px; font-size: 12.5px; color: #5c564e; }
+@media (max-width: 800px) {
+  .layout { grid-template-columns: 1fr !important; }
+  .side-col { position: static !important; }
+}
+.off { color:#c2410c; font-weight:700; }
+.tip.err { color:#b91c1c; }
 </style>

@@ -10,11 +10,15 @@ export default defineConfig({
     },
   },
   server: {
-    port: 8080,
+    host: '0.0.0.0',
+    port: 5173,
     proxy: {
-      // 开发时把 /api 代理到 Flask，避免浏览器跨域
       '/api': {
-        target: 'http://127.0.0.1:5000',
+        target: process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:5002',
+        changeOrigin: true,
+      },
+      '/static': {
+        target: process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:5002',
         changeOrigin: true,
       },
     },
