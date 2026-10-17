@@ -14,6 +14,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from flask_shop import create_app, db, models
+from flask_shop.utils.menu_defaults import MENU_L1, MENU_L2
 
 app = create_app('develop')
 
@@ -24,32 +25,6 @@ DEFAULT_PAY_GUIDE = (
     '3. 备注栏务必填写订单号\n'
     '4. 店长确认到账后发货（非官方自动扣款）'
 )
-
-MENU_L1 = [
-    ('用户管理', 'users'),
-    ('权限管理', 'rights'),
-    ('商品管理', 'goods'),
-    ('订单管理', 'orders'),
-    ('数据统计', 'reports'),
-    ('客服中心', 'service'),
-    ('店铺设置', 'shop'),
-]
-
-MENU_L2 = [
-    ('用户列表', 'user_list', '用户管理'),
-    ('角色列表', 'role_list', '权限管理'),
-    ('权限分配', 'author_list', '权限管理'),
-    ('动作权限', 'role_actions', '权限管理'),
-    ('商品列表', 'product_list', '商品管理'),
-    ('添加商品', 'add_product', '商品管理'),
-    ('分类参数', 'attribute_list', '商品管理'),
-    ('商品分类', 'group_list', '商品管理'),
-    ('运费模板', 'freight', '商品管理'),
-    ('订单列表', 'order_list', '订单管理'),
-    ('数据报表', 'data_list', '数据统计'),
-    ('客服工作台', 'customer_service', '客服中心'),
-    ('店铺设置', 'shop_settings', '店铺设置'),
-]
 
 
 def ensure_menus():

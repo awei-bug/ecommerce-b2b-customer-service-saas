@@ -164,15 +164,18 @@ class Product(Resource):
             if _f in body:
                 setattr(product, _f, (body.get(_f) or None) if not isinstance(body.get(_f), str) else (body.get(_f) or '').strip() or None)
         if 'weight' in body:
-            try: product.weight = float(body.get('weight') or 0)
-            except Exception: pass
-        if 'small_img' in body:
-            product.small_img = (body.get('small_img') or '').strip()[:255] or None
-        if 'weight' in body and body.get('weight') is not None:
+            # 该列是「商品权重」（排序用，Float），不是运费重量；全项目无任何
+            # 运费/称重逻辑读它。原实现先 float 赋值、又被后面的 int 分支覆盖，
+            # 导致 2.5 这类小数权重被静默截断成 2，字符串 "2.5" 还会误报
+            # 「权重不合法」。这里统一为 float，并按本方法既有风格返回 400。
             try:
-                product.weight = int(body.get('weight'))
+                product.weight = float(body.get('weight') or 0)
             except (TypeError, ValueError):
                 return {'status': 400, 'msg': '权重不合法'}
+            if product.weight < 0:
+                return {'status': 400, 'msg': '权重不能为负'}
+        if 'small_img' in body:
+            product.small_img = (body.get('small_img') or '').strip()[:255] or None
         if 'state' in body and body.get('state') is not None:
             st = body.get('state')
             if st not in (0, 1, 2, '0', '1', '2'):

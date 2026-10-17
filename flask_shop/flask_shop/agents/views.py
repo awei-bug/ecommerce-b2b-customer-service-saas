@@ -2,13 +2,14 @@
 """多智能体 HTTP 入口。"""
 from __future__ import annotations
 
-from flask import Blueprint, g, request
+from flask import Blueprint, current_app, g, request
 
 from flask_shop.agents.orchestrator import orchestrator
 import json
 import time
 from flask_shop.agents.memory import get_session, save_session, resolve_followup
 import uuid
+from flask_shop.utils.tenant import bind_tenant
 from flask_shop.utils.token import login_required, verify_token
 from flask_shop.utils.rbac import permission_required
 from flask_shop.utils.rate_limit import rate_limit
@@ -78,15 +79,18 @@ def agents_chat():
     slug = _resolve_tenant_slug()
     tenant_id = getattr(g, "tenant_id", None)
     if tenant_id is None:
-        try:
-            from flask_shop import models
-            from flask_shop.utils.tenant_query import tenant_context
+        from flask_shop import models
+        from flask_shop.utils.tenant_query import tenant_context
 
-            with tenant_context(disabled=True):
-                t = models.Tenant.query.filter_by(slug=slug).first()
-                tenant_id = t.id if t else None
-        except Exception:
-            tenant_id = None
+        # Tenant 表本身没有 tenant_id，查它时必须显式关闭过滤；
+        # 查到后立刻 bind_tenant，让后续所有带 tenant_id 的模型查询
+        # 走隔离层自动过滤。未绑定的话 TENANT_STRICT=1 会直接拦截，
+        # 生产环境则静默失去自动隔离保护。
+        with tenant_context(disabled=True):
+            tenant = models.Tenant.query.filter_by(slug=slug).first()
+        if tenant is not None:
+            bind_tenant(tenant)
+            tenant_id = tenant.id
 
     t0 = time.time()
     session_id = (body.get("session_id") or "").strip() or uuid.uuid4().hex
@@ -117,7 +121,8 @@ def agents_chat():
                     },
                 }
         except Exception:
-            pass
+            # 不能静默：这里失败意味着人工接管状态读不到，AI 会在人工已接管时抢答。
+            current_app.logger.exception("人工客服状态检查失败，AI 将按未接管处理")
 
     sess = get_session(session_id)
     persistent_memory = {}

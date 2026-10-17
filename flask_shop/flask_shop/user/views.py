@@ -10,7 +10,7 @@ from flask_restful import Resource, reqparse
 from flask_shop import db, models
 from flask_shop.user import user_api, user_bp
 from flask_shop.utils.audit import write_audit
-from flask_shop.utils.tenant import get_for_tenant, require_tenant_id, tenant_filter
+from flask_shop.utils.tenant import bind_tenant, get_for_tenant, require_tenant_id, tenant_filter
 from flask_shop.utils.token import generate_token, login_required
 from flask_shop.utils.auth_security import (
     clear_login_failures,
@@ -51,6 +51,10 @@ def login():
         tenant = q.order_by(models.Tenant.id.asc()).first()
     if not tenant:
         return {'status': 400, 'msg': '店铺不存在，请先执行 seed 初始化'}
+
+    # 先绑租户上下文再查 User：User 带 tenant_id，
+    # TENANT_STRICT 下未绑租户查询会被隔离层拦截（与 utils/token.py 同款处理）。
+    bind_tenant(tenant)
 
     # 解析出默认租户后再次检查账户锁，避免省略 tenant_slug 绕过账户维度锁定。
     locked_seconds = login_lock_status(name, tenant.slug)

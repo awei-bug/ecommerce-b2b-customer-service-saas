@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import text
 
 from flask_shop import db, models
+from flask_shop.utils import menu_defaults
 from flask_shop.utils.rbac import ALL_ACTION_CODES, ROLE_TEMPLATES
 from flask_shop.utils.tenant_query import tenant_context
 
@@ -21,31 +22,8 @@ DEFAULT_PAY_GUIDE = (
     "店员核对到账后会确认收款并安排发货。"
 )
 
-MENU_L1 = [
-    ("用户管理", "users"),
-    ("权限管理", "rights"),
-    ("商品管理", "goods"),
-    ("订单管理", "orders"),
-    ("数据统计", "reports"),
-    ("客服中心", "service"),
-    ("店铺设置", "shop"),
-]
-
-MENU_L2 = [
-    ("用户列表", "user_list", "用户管理"),
-    ("角色列表", "role_list", "权限管理"),
-    ("权限分配", "author_list", "权限管理"),
-    ("动作权限", "role_actions", "权限管理"),
-    ("商品列表", "product_list", "商品管理"),
-    ("添加商品", "add_product", "商品管理"),
-    ("分类参数", "attribute_list", "商品管理"),
-    ("商品分类", "group_list", "商品管理"),
-    ("运费模板", "freight", "商品管理"),
-    ("订单列表", "order_list", "订单管理"),
-    ("数据报表", "data_list", "数据统计"),
-    ("客服工作台", "customer_service", "客服中心"),
-    ("店铺设置", "shop_settings", "店铺设置"),
-]
+MENU_L1 = menu_defaults.MENU_L1
+MENU_L2 = menu_defaults.MENU_L2
 
 TEMPLATE_HEADERS = {
     "products": ["name", "price", "stock", "category", "description", "publish"],

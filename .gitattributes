@@ -1,6 +1,12 @@
 # 统一换行：仓库内以 LF 存储，避免 Windows/CI(Linux) 之间反复 CRLF 抖动
 * text=auto eol=lf
 
+# Windows 原生脚本必须保留 CRLF：cmd.exe 对纯 LF 的 .bat 在 goto/多行 if/for
+# 上会出错，且最后一行命令可能被丢弃。同时避免这两个文件长期显示"已修改"。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
 # 明确二进制，避免被当文本处理
 *.png binary
 *.jpg binary

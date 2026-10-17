@@ -23,6 +23,9 @@ POLICY_QUERY_PATTERNS = [
     r"营业时间|客服时间|门店|自提|会员|积分|优惠券|政策|规则",
 ]
 
+# RRF 平滑常数，取 Cormack 等 2009 年提出 RRF 时的原始取值。
+RRF_K = 60
+
 
 def tokenize(text: str) -> List[str]:
     if not text:
@@ -177,6 +180,37 @@ def requires_grounded_answer(text: str, intent: Optional[str] = None) -> bool:
     return any(re.search(pattern, value, re.I) for pattern in POLICY_QUERY_PATTERNS)
 
 
+def _rrf_merge(
+    ranked_lists: List[List[Dict[str, Any]]],
+    limit: int,
+    k: int = RRF_K,
+) -> List[Dict[str, Any]]:
+    """倒数秩融合（Reciprocal Rank Fusion）合并多路召回结果。
+
+    为什么用 RRF 而不是直接比分数：店铺知识路的分是手工字段权重累加
+    （无上界），商品路回源时拿到的分来自数据中心，两者量纲不可比，
+    线性加权需要精细调参。RRF 只看排名位置，score = Σ 1/(k + rank)，
+    两路排名靠前的都能进结果，不需要归一化。
+
+    此前这里是 ``(store_cards + product_cards)[:limit]``：两路各自已按
+    limit 截断，拼接后再取 limit 等于"先到先得"，只要店铺知识路占满
+    名额，商品知识卡会被整条丢弃（catalog_agent 的商品兜底检索因此
+    长期拿不到数据）。RRF 修正了这个退化。
+    """
+    fused: Dict[str, float] = {}
+    cards: Dict[str, Dict[str, Any]] = {}
+    for ranked in ranked_lists:
+        for rank, card in enumerate(ranked or [], start=1):
+            key = str(card.get("citation_id") or "")
+            if not key:
+                key = f"anon-{id(card)}"
+            fused[key] = fused.get(key, 0.0) + 1.0 / (k + rank)
+            cards.setdefault(key, card)
+    # 同分时按 citation_id 稳定排序，避免结果随机漂移
+    ordered = sorted(fused.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [cards[key] for key, _ in ordered[:limit]]
+
+
 def load_knowledge(
     tenant_id: Optional[int],
     query: str,
@@ -223,7 +257,7 @@ def load_knowledge(
             current_app.logger.exception("hub knowledge search failed")
             product_cards = []
 
-    return (store_cards + product_cards)[:limit]
+    return _rrf_merge([store_cards, product_cards], limit)
 
 
 def citations(cards: List[Dict[str, Any]], limit: int = 3) -> List[Dict[str, Any]]:

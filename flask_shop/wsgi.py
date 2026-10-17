@@ -5,7 +5,6 @@
 import os
 
 from flask_cors import CORS
-from flask_migrate import Migrate
 
 # 必须在 create_app 前设置（.env 里也可写 FLASK_CONFIG=product）
 os.environ.setdefault('FLASK_CONFIG', os.getenv('FLASK_CONFIG', 'product'))
@@ -27,8 +26,6 @@ if _cors:
 else:
     # 未配置时仍打开 CORS，便于初期联调；上线后请设置 CORS_ORIGINS
     CORS(app, supports_credentials=True)
-
-Migrate(app, db)
 
 # 生产配置校验（SECRET_KEY 等）
 cfg = config_map.get(_config_name)

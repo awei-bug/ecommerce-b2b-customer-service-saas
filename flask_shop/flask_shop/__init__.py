@@ -6,6 +6,30 @@ from config import config_map
 
 db = SQLAlchemy()
 
+
+# 幂等补列时「可预期失败」的报错特征，用于区分静默条件与真实故障：
+# - 对象已存在（列/索引/表）：重复补列，直接跳过。
+# - 表不存在（SQLite "no such table" / MySQL "doesn't exist"）：本函数先跑
+#   ALTER 再跑 create_all，全新库上表尚未建立属正常流程，create_all 会兜底建表。
+# 除此以外的失败（如 ALTER 权限被拒、表被锁、语法错误）必须告警留痕。
+_ALREADY_EXISTS_MARKERS = (
+    'duplicate column',    # MySQL 1060 / SQLite
+    'already exists',      # SQLite / PostgreSQL
+    'duplicate key name',  # MySQL 1061 索引
+    'errno 1060',
+    'errno 1061',
+    'no such table',       # SQLite
+    "doesn't exist",       # MySQL 1146
+    'does not exist',
+    'errno 1146',
+)
+
+
+def _is_already_exists(exc: Exception) -> bool:
+    text_ = str(exc).lower()
+    return any(marker in text_ for marker in _ALREADY_EXISTS_MARKERS)
+
+
 def ensure_schema_compat(app):
     """轻量兼容：为已有库补租户扩展列（忽略已存在错误）。"""
     from sqlalchemy import text
@@ -48,14 +72,22 @@ def ensure_schema_compat(app):
             try:
                 db.session.execute(text(sql))
                 db.session.commit()
-            except Exception:
+            except Exception as exc:
                 db.session.rollback()
+                # 「列/索引已存在」是幂等补列的预期结果，可以静默；
+                # 其余失败必须留痕：否则这一列没补上，应用仍能正常启动，
+                # 直到线上真正读到该列才以 unknown column 崩掉，很难定位。
+                if not _is_already_exists(exc):
+                    app.logger.warning(
+                        'ensure_schema_compat 补列失败（该列可能缺失）: %s | %s', sql, exc,
+                    )
         try:
             # 新表：多智能体轨迹
             from flask_shop import models as _m
             db.create_all()
         except Exception:
             db.session.rollback()
+            app.logger.exception('ensure_schema_compat create_all 失败，新表可能未创建')
 
 
 

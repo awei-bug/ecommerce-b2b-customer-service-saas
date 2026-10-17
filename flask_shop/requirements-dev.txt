@@ -1,0 +1,14 @@
+# 开发/测试依赖：pip install -r requirements-dev.txt
+#
+# 运行测试需要 pytest；openpyxl（在 requirements.txt 中）被
+# tests/test_tenant_onboarding.py 用于校验导出的 Excel 模板。
+#
+# 以下两项只被 scripts/ 下的工具脚本使用，应用本体不依赖：
+#   pillow     -> scripts/tools/make_listing_pack_100.py 生成演示商品图
+#   playwright -> scripts/verify/verify_ops_ui.py 后台 UI 校验
+#                 （装完还需执行 `python -m playwright install chromium`）
+-r requirements.txt
+
+pytest>=8,<10
+pillow==12.3.0
+playwright==1.62.0

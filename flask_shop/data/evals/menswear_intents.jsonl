@@ -1,38 +1,138 @@
-{"text":"有没有黑色短袖","intent":"search"}
-{"text":"找一件宽松工装裤","intent":"search"}
-{"text":"看看春季夹克","intent":"search"}
-{"text":"有没有适合通勤的衬衫","intent":"search"}
-{"text":"我想找一条直筒牛仔裤","intent":"search"}
-{"text":"100元内有什么男装","intent":"search"}
-{"text":"帮我推荐一件潮流外套","intent":"recommend"}
-{"text":"男生约会穿什么","intent":"recommend"}
-{"text":"推荐适合学生党的衣服","intent":"recommend"}
-{"text":"有什么显瘦的裤子推荐","intent":"recommend"}
-{"text":"帮我选一套夏季穿搭","intent":"recommend"}
-{"text":"预算300元帮我搭一套","intent":"recommend"}
-{"text":"这两件夹克哪个好","intent":"compare"}
-{"text":"黑色和蓝色有什么区别","intent":"compare"}
-{"text":"宽松版和修身版怎么选","intent":"compare"}
-{"text":"这款和那款哪个更厚","intent":"compare"}
-{"text":"怎么付款","intent":"pay_help"}
-{"text":"可以扫码支付吗","intent":"pay_help"}
-{"text":"付款后多久发货","intent":"pay_help"}
-{"text":"收款码在哪里","intent":"pay_help"}
-{"text":"查一下我的订单","intent":"order_status"}
-{"text":"我买的衣服订单到哪了","intent":"order_status"}
-{"text":"怎么看我的单","intent":"order_status"}
-{"text":"我的订单状态是什么","intent":"order_status"}
-{"text":"发货了吗","intent":"track"}
-{"text":"快递到哪里了","intent":"track"}
-{"text":"物流信息怎么查","intent":"track"}
-{"text":"什么时候能收到","intent":"track"}
-{"text":"我想退款","intent":"refund"}
-{"text":"这件衣服可以退吗","intent":"refund"}
-{"text":"我要申请售后","intent":"refund"}
-{"text":"尺码不合适怎么换","intent":"refund"}
-{"text":"转人工客服","intent":"cs"}
-{"text":"我要投诉","intent":"cs"}
-{"text":"联系店长","intent":"cs"}
-{"text":"你好，在吗","intent":"greeting"}
-{"text":"您好","intent":"greeting"}
-{"text":"有人吗","intent":"greeting"}
+{"text": "M码的白色衬衫有吗", "intent": "search"}
+{"text": "店里有没有防水冲锋衣", "intent": "search"}
+{"text": "找一个深蓝色牛仔裤", "intent": "search"}
+{"text": "你们的休闲裤多少钱一条", "intent": "search"}
+{"text": "有没有大码男装", "intent": "search"}
+{"text": "想看下夏天的短裤", "intent": "search"}
+{"text": "有纯棉的白T吗", "intent": "search"}
+{"text": "XXL的卫衣有货吗", "intent": "search"}
+{"text": "看看你们家有没有羊毛大衣", "intent": "search"}
+{"text": "200块以内的衬衫", "intent": "search"}
+{"text": "有没有不带帽子的卫衣", "intent": "search"}
+{"text": "这款还有黑色吗", "intent": "search"}
+{"text": "新到的夹克有吗", "intent": "search"}
+{"text": "有没有可以机洗的外套", "intent": "search"}
+{"text": "店里最便宜的裤子是哪条", "intent": "search"}
+{"text": "帮我推荐一件秋天的外套", "intent": "recommend"}
+{"text": "有什么值得买的", "intent": "recommend"}
+{"text": "不知道买什么好", "intent": "recommend"}
+{"text": "想买件外套，有什么推荐", "intent": "recommend"}
+{"text": "推荐一款适合上班穿的", "intent": "recommend"}
+{"text": "帮我搭配一套", "intent": "recommend"}
+{"text": "有什么爆款", "intent": "recommend"}
+{"text": "第一次来，推荐几件吧", "intent": "recommend"}
+{"text": "送人有什么推荐", "intent": "recommend"}
+{"text": "给我推个卫衣", "intent": "recommend"}
+{"text": "按我身材推荐", "intent": "recommend"}
+{"text": "哪件卖得最好", "intent": "recommend"}
+{"text": "有没有推荐的", "intent": "recommend"}
+{"text": "这两件外套哪个保暖", "intent": "compare"}
+{"text": "A款和B款的区别", "intent": "compare"}
+{"text": "纯棉和混纺哪个好", "intent": "compare"}
+{"text": "两款卫衣怎么选", "intent": "compare"}
+{"text": "贵的和便宜的差在哪", "intent": "compare"}
+{"text": "哪件性价比高", "intent": "compare"}
+{"text": "这件跟那件哪个更适合我", "intent": "compare"}
+{"text": "三个款帮我比较下", "intent": "compare"}
+{"text": "有没有比这个更便宜的", "intent": "compare"}
+{"text": "这两款哪个更耐穿", "intent": "compare"}
+{"text": "怎么付钱", "intent": "pay_help"}
+{"text": "可以货到付款吗", "intent": "pay_help"}
+{"text": "支持花呗吗", "intent": "pay_help"}
+{"text": "怎么用微信支付", "intent": "pay_help"}
+{"text": "收款码发一下", "intent": "pay_help"}
+{"text": "可以先付定金吗", "intent": "pay_help"}
+{"text": "转账要注意什么", "intent": "pay_help"}
+{"text": "你们怎么收款", "intent": "pay_help"}
+{"text": "可以分期吗", "intent": "pay_help"}
+{"text": "下单后怎么付款", "intent": "pay_help"}
+{"text": "能用支付宝吗", "intent": "pay_help"}
+{"text": "支持信用卡吗", "intent": "pay_help"}
+{"text": "我的订单状态是什么", "intent": "order_status"}
+{"text": "帮我查下订单", "intent": "order_status"}
+{"text": "我下了几个单", "intent": "order_status"}
+{"text": "待付款的订单在哪", "intent": "order_status"}
+{"text": "我的订单怎么还没确认", "intent": "order_status"}
+{"text": "查一下我买的东西", "intent": "order_status"}
+{"text": "订单多久确认", "intent": "order_status"}
+{"text": "没看到我的订单", "intent": "order_status"}
+{"text": "我的快递到哪了", "intent": "track"}
+{"text": "发货了没有", "intent": "track"}
+{"text": "物流信息怎么看", "intent": "track"}
+{"text": "什么时候能收到货", "intent": "track"}
+{"text": "我的货发出去了吗", "intent": "track"}
+{"text": "怎么查物流", "intent": "track"}
+{"text": "到哪儿了", "intent": "track"}
+{"text": "快递单号", "intent": "track"}
+{"text": "帮我看看物流进展", "intent": "track"}
+{"text": "今天能到吗", "intent": "track"}
+{"text": "退款多久到账", "intent": "refund"}
+{"text": "怎么申请退货", "intent": "refund"}
+{"text": "尺码不合适能换吗", "intent": "refund"}
+{"text": "七天无理由可以吗", "intent": "refund"}
+{"text": "质量问题怎么办", "intent": "refund"}
+{"text": "退款退到哪", "intent": "refund"}
+{"text": "退货地址", "intent": "refund"}
+{"text": "可以换一件吗", "intent": "refund"}
+{"text": "衣服破了想退", "intent": "refund"}
+{"text": "收到货有瑕疵", "intent": "refund"}
+{"text": "怎么退货退款", "intent": "refund"}
+{"text": "支持七天无理由吗", "intent": "refund"}
+{"text": "人工客服在吗", "intent": "cs"}
+{"text": "我要投诉", "intent": "cs"}
+{"text": "帮我想店家反映一下", "intent": "cs"}
+{"text": "有没有人工", "intent": "cs"}
+{"text": "转人工", "intent": "cs"}
+{"text": "客服电话多少", "intent": "cs"}
+{"text": "你们几点下班", "intent": "cs"}
+{"text": "你好呀", "intent": "greeting"}
+{"text": "早上好", "intent": "greeting"}
+{"text": "哈喽", "intent": "greeting"}
+{"text": "谢谢", "intent": "greeting"}
+{"text": "谢谢啦", "intent": "greeting"}
+{"text": "什么时候发货", "intent": "track"}
+{"text": "怎么还不发货", "intent": "track"}
+{"text": "我的货到哪了", "intent": "track"}
+{"text": "退款到账要多久", "intent": "refund"}
+{"text": "付了款没收到怎么办", "intent": "refund"}
+{"text": "钱什么时候退回来", "intent": "refund"}
+{"text": "我的单子到哪了", "intent": "order_status"}
+{"text": "帮我看看订单进展", "intent": "order_status"}
+{"text": "单号怎么查", "intent": "track"}
+{"text": "优惠券怎么用", "intent": "cs"}
+{"text": "有没有黑色短袖", "intent": "search"}
+{"text": "找一件宽松工装裤", "intent": "search"}
+{"text": "看看春季夹克", "intent": "search"}
+{"text": "有没有适合通勤的衬衫", "intent": "search"}
+{"text": "我想找一条直筒牛仔裤", "intent": "search"}
+{"text": "100元内有什么男装", "intent": "search"}
+{"text": "帮我推荐一件潮流外套", "intent": "recommend"}
+{"text": "男生约会穿什么", "intent": "recommend"}
+{"text": "推荐适合学生党的衣服", "intent": "recommend"}
+{"text": "有什么显瘦的裤子推荐", "intent": "recommend"}
+{"text": "帮我选一套夏季穿搭", "intent": "recommend"}
+{"text": "预算300元帮我搭一套", "intent": "recommend"}
+{"text": "这两件夹克哪个好", "intent": "compare"}
+{"text": "黑色和蓝色有什么区别", "intent": "compare"}
+{"text": "宽松版和修身版怎么选", "intent": "compare"}
+{"text": "这款和那款哪个更厚", "intent": "compare"}
+{"text": "怎么付款", "intent": "pay_help"}
+{"text": "可以扫码支付吗", "intent": "pay_help"}
+{"text": "付款后多久发货", "intent": "pay_help"}
+{"text": "收款码在哪里", "intent": "pay_help"}
+{"text": "查一下我的订单", "intent": "order_status"}
+{"text": "我买的衣服订单到哪了", "intent": "order_status"}
+{"text": "怎么看我的单", "intent": "order_status"}
+{"text": "发货了吗", "intent": "track"}
+{"text": "快递到哪里了", "intent": "track"}
+{"text": "物流信息怎么查", "intent": "track"}
+{"text": "什么时候能收到", "intent": "track"}
+{"text": "我想退款", "intent": "refund"}
+{"text": "这件衣服可以退吗", "intent": "refund"}
+{"text": "我要申请售后", "intent": "refund"}
+{"text": "尺码不合适怎么换", "intent": "refund"}
+{"text": "转人工客服", "intent": "cs"}
+{"text": "联系店长", "intent": "cs"}
+{"text": "你好，在吗", "intent": "greeting"}
+{"text": "您好", "intent": "greeting"}
+{"text": "有人吗", "intent": "greeting"}

@@ -33,11 +33,12 @@
 
 ### 3. 数据库迁移规范化
 
-- 当前已有幂等 Python 迁移脚本，但还未统一到 Alembic/Flask-Migrate 版本链。
-- 为已有客户数据库建立版本号、升级顺序和回滚说明。
-- 验证 MySQL 目标版本下索引、字符集、金额精度和并发事务。
+- **已决策（2026-10-17）：不走 Alembic/Flask-Migrate**。schema 由启动自愈（`ensure_schema_compat` + `create_all`）+ 幂等 `scripts/migrations/*.py` 负责，详见 `docs/operations/migration.md`。Alembic 已从 requirements 移除、`flask db` 不可用，`migrations/` 目录标为废弃参考。
+- 待做：为已有客户数据库建立**升级顺序清单**（当前 14 个脚本无统一 runner 和版本号，靠人工按功能顺序执行）。
+- 待做：验证 MySQL 目标版本下索引、字符集、金额精度和并发事务。
+- 后续如要正规化（Plan A）：把启动自愈 + 手写脚本归并进真正的版本链，见 `docs/operations/migration.md` 末尾。
 
-完成标准：空库和旧版本数据库都能通过同一迁移命令升级到当前结构。
+完成标准（按 Plan B）：全新库首启自动建全表；存量库按文档流程升级且先备份；升级在 staging 验证过。
 
 ### 4. 备份、恢复与故障演练
 

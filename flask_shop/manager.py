@@ -1,5 +1,4 @@
 from flask import Flask
-from flask_migrate import Migrate
 from flask_cors import CORS
 import os
 
@@ -43,9 +42,6 @@ else:
         allow_headers=['Content-Type', 'Authorization', 'token', 'X-Tenant-Slug', 'X-Tenant-Id', 'X-Customer-Token'],
         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     )
-
-Migrate(app, db)
-
 
 @app.cli.command('close-expired-orders')
 def close_expired_orders_cmd():

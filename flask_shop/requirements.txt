@@ -1,12 +1,10 @@
-# Flask==2.2.5
+Flask==2.2.5
 Werkzeug==2.2.3
 Flask-Cors==3.0.10
-Flask-Migrate==4.0.0
 Flask-RESTful==0.3.9
 Flask-SQLAlchemy==3.0.5
 SQLAlchemy==2.0.36
 greenlet==3.1.1
-alembic==1.9.2
 PyJWT==2.6.0
 PyMySQL==1.1.1
 python-dotenv==1.0.1
@@ -15,6 +13,13 @@ MarkupSafe==2.1.5
 itsdangerous==2.1.2
 click==8.1.7
 openpyxl==3.1.5
+# 应用运行期依赖（此前漏声明，全新部署会缺）：
+#   requests     -> utils/hub_client.py 模块级 import，数据中心回源与商品同步用
+#   wechatpayv3  -> utils/pay_channel.py 懒加载，微信支付 v3 直连商户下单用
+requests==2.34.2
+wechatpayv3==1.2.53
+# waitress -> deploy/win/sample_shop_server.py 本机/内网样板店单入口的 WSGI 服务器
+waitress==3.0.2
 aniso8601==9.0.1
 pytz==2024.1
 six==1.16.0

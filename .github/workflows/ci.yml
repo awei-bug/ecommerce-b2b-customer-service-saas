@@ -25,19 +25,18 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
+          pip install -r requirements-dev.txt
 
       - name: Run tests (TENANT_STRICT=1)
         env:
           TENANT_STRICT: "1"
           FLASK_ENV: testing
-        run: python -m pytest -q
+        run: python -m pytest -q --junitxml=pytest-report.xml
 
       - name: Upload pytest report on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: pytest-logs
-          path: flask_shop/.pytest_cache
+          name: pytest-report
+          path: pytest-report.xml
           if-no-files-found: ignore

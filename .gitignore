@@ -40,6 +40,10 @@ env/
 flask_shop/flask_shop/static/upload/*
 !flask_shop/flask_shop/static/upload/.gitkeep
 
+# ---- 测试产物（Playwright 截图/日志，不入库）----
+test-results/
+playwright-report/
+
 # ---- 前端 ----
 node_modules/
 **/node_modules/
@@ -55,3 +59,6 @@ mall/dist/
 .DS_Store
 Thumbs.db
 *.tmp
+
+# WorkBuddy 会话数据
+.workbuddy/

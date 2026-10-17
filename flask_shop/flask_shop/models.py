@@ -264,7 +264,7 @@ class Product(db.Model, BaseModel):
     big_img = db.Column(db.String(255))
     small_img = db.Column(db.String(255))
     state = db.Column(db.Integer, default=2)  # 2 上架 0 下架
-    weight = db.Column(db.Float, default=0)  # kg
+    weight = db.Column(db.Float, default=0)  # 商品权重（后台排序用），非运费重量
     sell_points = db.Column(db.Text)  # 卖点
     hot_number = db.Column(db.Integer, default=0)
     is_promote = db.Column(db.Integer, default=0)
