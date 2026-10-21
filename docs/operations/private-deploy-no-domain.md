@@ -78,6 +78,36 @@ flask_shop\.venv\Scripts\python.exe deploy\win\sample_shop_server.py
 - [ ] 重启服务后数据还在（MySQL 卷 / SQLite 文件持久化）。
 - [ ] 登录失败 5 次会被锁定（防爆破）。
 - [ ] 关闭 `ALLOW_MOCK_PAY`、`SMS_DEV_MODE` 后，固定验证码和模拟支付不可用。
+- [ ] 恢复演练跑过一遍，结论为全 PASS（见下节）。
+
+## 备份与恢复演练
+
+上线前必须做一次**有记录**的恢复演练——"脚本存在"不算，要能证明这份备份真能救回来。
+
+```
+cd flask_shop
+python ..\deploy\win\backup_mysql_local.py          # 先打一份新备份
+python scripts\verify\rehearse_restore.py           # 备份 → 恢复到临时库 → 逐表核对
+```
+
+脚本做四件事，并且**源库全程只读**：
+
+1. 取最新备份（或 `--backup 指定文件`）；
+2. 恢复到独立临时库（默认 `<源库名>_restore`），不碰正式库；
+3. 逐表比对源库与恢复库行数，并对 `t_order` / `t_payments` / `t_tenants` 做数据合法性抽查
+   （金额非负、状态非空、租户 slug 唯一）；
+4. 断言演练前后源库行数不变，确认没有误写正式库。
+
+结论写入 `deploy/backups/rehearsal-<时间戳>.json`，含逐项断言明细。任一项失败则 exit 1。
+
+`--keep` 可保留临时库供人工排查；不加则自动删除。
+
+本机实测（2026-12）：42 张表行数全部一致、404 条 SQL 无失败、14/14 断言通过。
+另验证了故障识别能力——故意投入截断备份，脚本正确报出 33 张表缺失并以 exit 1 结束，
+说明它不会静默放过残缺备份。
+
+> 注意：`deploy/backups/` 已被 `.gitignore` 忽略（备份含真实数据快照，不应入库）。
+> 演练报告同理不入库；交付时把 `rehearsal-*.json` 随交付包单独归档。
 
 ## 已验证 vs 待验证
 
