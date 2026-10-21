@@ -31,7 +31,49 @@
 
 1. 先备份（`deploy/backup_all.sh`）。
 2. 升级代码 → 重启 → `ensure_schema_compat` 自动补列/建新表。
-3. 逐个执行本次版本新增的 `scripts/migrations/migrate_*.py`（**先在一台 staging 上跑一遍**再上生产）。
+3. 执行统一 runner 跑完本次版本新增的脚本（**先在一台 staging 上跑一遍**再上生产）：
+
+   ```powershell
+   cd flask_shop
+   python scripts/migrations/run_migrations.py
+   ```
+
+## 迁移 runner（2026-12 新增）
+
+14 个 `scripts/migrations/migrate_*.py` 已有统一入口，不再需要人工逐个执行：
+
+```powershell
+cd flask_shop
+python scripts/migrations/run_migrations.py            # 按依赖顺序跑，已执行的自动跳过
+python scripts/migrations/run_migrations.py --dry-run  # 只看顺序，不执行
+python scripts/migrations/run_migrations.py --force    # 全部重跑（脚本幂等，用于怀疑记录不准时）
+python scripts/migrations/run_migrations.py --only migrate_sku   # 只跑指定脚本
+```
+
+行为约定：
+
+- **固定顺序**：`run_migrations.py` 顶部的 `ORDER` 按真实依赖编排，不是字典序。
+  关键约束：`rbac_actions` 必须早于任何写 `perm_codes` 的脚本（否则缺列直接报错）；
+  `order_payment` 必须早于 `owner_dashboard`（后者要给 `t_order` 加列）；
+  `tenant_onboarding` 最后跑（按 slug 回填 `data_mode`，需要租户表稳定）。
+- **断点续跑**：执行记录写库内 `schema_migrations` 表（name / applied_at / elapsed_ms / status / message）。
+  重跑时已成功的会跳过——**注意这只是省时间，不是因为脚本不能重跑**，所有脚本都幂等。
+- **失败即停**：任一脚本失败立即中止并汇报进度，不会在残缺 schema 上继续跑。修复后重跑同一命令即可。
+- **未登记脚本拒绝运行**：目录里有 `migrate_*.py` 但不在 `ORDER` 里时，runner 以 exit 2 退出并列出文件名。
+  这是为了防止新脚本被悄悄遗忘——加进 `ORDER` 时请在 PR 里说明依赖理由。
+- **双方言**：`schema_migrations` 的 upsert 对 MySQL 用 `ON DUPLICATE KEY UPDATE`、
+  SQLite 用 `ON CONFLICT(name)`，测试与部分部署走 SQLite 不会语法错误。
+
+### runner 的验收口径
+
+在一键全空库上从零执行应满足：
+
+1. `run_migrations.py` 一次跑通 14 个，退出码 0；
+2. 立即重跑，14 个全部跳过，退出码 0；
+3. `--force` 重跑 14 个仍全部成功，且不产生重复数据；
+4. 用该库跑 `pytest -q` 全绿（已实测：SQLite 空库 + runner + pytest 91 passed）。
+
+将来若走 Plan A（真版本链），`schema_migrations` 表可以直接当 version 表用。
 
 ## 新增迁移的规范
 
@@ -39,7 +81,9 @@
 - **改已有表 / 回填数据**：新建 `scripts/migrations/migrate_<feature>.py`，必须满足：
   - 幂等：先用 `inspect` 或 `column_exists(table, column)` 判断再执行；
   - docstring 写清用法与目的（参照现有脚本的格式）；
-  - 只写 MySQL 兼容 DDL。
+  - 提供 `main()` 或 `migrate()` 入口（runner 两种都认）；
+  - **登记进 `run_migrations.py` 的 `ORDER`** 并说明依赖理由——不登记则 runner 拒绝运行；
+  - 只写 MySQL 兼容 DDL（SQLite 下 `ensure_schema_compat` 的告警是预期行为，见「已知约束」）。
 - **不要**把永久业务逻辑堆进 `ensure_schema_compat` 的硬编码列表；那里只放「启动自愈」级别的兼容补列。
 
 ## 已知约束

@@ -34,9 +34,12 @@
 ### 3. 数据库迁移规范化
 
 - **已决策（2026-10-17）：不走 Alembic/Flask-Migrate**。schema 由启动自愈（`ensure_schema_compat` + `create_all`）+ 幂等 `scripts/migrations/*.py` 负责，详见 `docs/operations/migration.md`。Alembic 已从 requirements 移除、`flask db` 不可用，`migrations/` 目录标为废弃参考。
-- 待做：为已有客户数据库建立**升级顺序清单**（当前 14 个脚本无统一 runner 和版本号，靠人工按功能顺序执行）。
+- **已完成（2026-12）：统一 runner** `scripts/migrations/run_migrations.py`。14 个脚本按真实依赖编排成固定顺序、断点续跑、失败即停，并在库内 `schema_migrations` 表记录执行历史。
+  用法：`python scripts/migrations/run_migrations.py`；`--dry-run` 看顺序，`--force` 全部重跑（脚本本身幂等），`--only xxx` 跑单个。
+  **新增迁移脚本必须登记进 runner 的 `ORDER` 并说明依赖理由**，否则 runner 会以 exit 2 拒绝运行（防止脚本永远不被执行）。
+  MySQL 与 SQLite 双适配（upsert 语法分方言处理）。
 - 待做：验证 MySQL 目标版本下索引、字符集、金额精度和并发事务。
-- 后续如要正规化（Plan A）：把启动自愈 + 手写脚本归并进真正的版本链，见 `docs/operations/migration.md` 末尾。
+- 后续如要正规化（Plan A）：把启动自愈 + 手写脚本归并进真正的版本链，见 `docs/operations/migration.md` 末尾。`schema_migrations` 表可直接当 version 表用。
 
 完成标准（按 Plan B）：全新库首启自动建全表；存量库按文档流程升级且先备份；升级在 staging 验证过。
 
