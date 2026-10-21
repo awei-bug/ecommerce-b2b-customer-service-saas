@@ -65,7 +65,7 @@ def _get_product(tenant_id: int, product_id: Optional[int]):
     if not product_id:
         return None
     with tenant_context(tenant_id=tenant_id):
-        return models.Product.query.get(int(product_id))
+        return db.session.get(models.Product, int(product_id))
 
 
 def _apply_item(tenant_id: int, item: Dict[str, Any], publish: bool) -> Dict[str, Any]:

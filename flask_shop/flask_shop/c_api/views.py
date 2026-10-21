@@ -608,7 +608,7 @@ def c_create_order():
     tenant_id = require_tenant_id()
     tenant = getattr(g, 'tenant', None)
     if tenant is None or getattr(tenant, 'id', None) != tenant_id:
-        tenant = models.Tenant.query.get(tenant_id)
+        tenant = db.session.get(models.Tenant, tenant_id)
     if tenant is not None and getattr(tenant, 'status', 1) != 1:
         return {'status': 403, 'msg': '店铺暂停营业，暂不可下单'}
     if not _tenant_has_pay_qr(tenant):

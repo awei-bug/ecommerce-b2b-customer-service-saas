@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from flask import current_app
 
-from flask_shop import models
+from flask_shop import db, models
 from flask_shop.utils.tenant_query import tenant_context
 
 # plan_code -> limits
@@ -22,7 +22,7 @@ def get_limits(plan_code: str | None) -> dict:
 
 def check_product_quota(tenant_id: int) -> tuple[bool, str]:
     with tenant_context(disabled=True):
-        t = models.Tenant.query.get(tenant_id)
+        t = db.session.get(models.Tenant, tenant_id)
         if not t:
             return False, "租户不存在"
         lim = get_limits(getattr(t, "plan_code", None))

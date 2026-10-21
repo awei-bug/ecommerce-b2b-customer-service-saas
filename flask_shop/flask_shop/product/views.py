@@ -782,7 +782,7 @@ def hub_sync_products():
         return {'status': 503, 'msg': '未配置 DATA_HUB_URL，数据中心通道已关闭'}
 
     tenant_id = require_tenant_id()
-    tenant = models.Tenant.query.get(tenant_id)
+    tenant = db.session.get(models.Tenant, tenant_id)
     if not tenant:
         return {'status': 404, 'msg': '租户不存在'}
 

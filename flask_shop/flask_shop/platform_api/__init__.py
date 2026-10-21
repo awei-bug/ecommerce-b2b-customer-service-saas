@@ -140,7 +140,7 @@ def set_tenant_status(tid):
     status = body.get('status')
     if status not in (0, 1, '0', '1'):
         return {'status': 400, 'msg': 'status 须为 0 或 1'}
-    tenant = models.Tenant.query.get(tid)
+    tenant = db.session.get(models.Tenant, tid)
     if not tenant:
         return {'status': 404, 'msg': '租户不存在'}
     tenant.status = int(status)

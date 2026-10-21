@@ -147,7 +147,7 @@ def del_menu(rid: int, mid: int):
     if not staff_has_permission('role:write'):
         return {'status': 403, 'msg': '无权限分配菜单'}
     role = get_for_tenant(models.Role, rid)
-    menu = models.Menu.query.get(mid)
+    menu = db.session.get(models.Menu, mid)
     if all([role, menu]):
         if menu in role.menus:
             role.menus.remove(menu)
@@ -175,7 +175,7 @@ def set_menu(rid: int):
         mids = (mids or '').split(',')
         for m in mids:
             if m:
-                menu = models.Menu.query.get(int(m))
+                menu = db.session.get(models.Menu, int(m))
                 if menu:
                     role.menus.append(menu)
         db.session.commit()

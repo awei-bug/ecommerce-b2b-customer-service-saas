@@ -117,10 +117,10 @@ def customer_login_required(view_func):
         if not tenant_id or not customer_id:
             return {'status': 401, 'msg': 'token 无效'}
 
-        from flask_shop import models
+        from flask_shop import db, models
         # 先绑租户上下文再查 Customer（Customer 带 tenant_id，STRICT 下顺序不能反）
         if not getattr(g, 'tenant', None):
-            tenant = models.Tenant.query.get(tenant_id)
+            tenant = db.session.get(models.Tenant, tenant_id)
             g.tenant = tenant
         g.tenant_id = tenant_id
 
