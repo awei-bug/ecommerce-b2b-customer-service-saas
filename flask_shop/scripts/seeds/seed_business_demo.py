@@ -12,6 +12,7 @@ if ROOT not in sys.path:
 
 from flask_shop import create_app, db, models  # noqa: E402
 from flask_shop.utils.tenant_query import tenant_context  # noqa: E402
+from flask_shop.utils.demo_seed import reject_production_demo_seed  # noqa: E402
 
 
 def upsert(model, defaults=None, **keys):
@@ -26,12 +27,15 @@ def upsert(model, defaults=None, **keys):
 
 
 def main():
+    reject_production_demo_seed()
     app = create_app(os.getenv("FLASK_CONFIG", "develop"))
     now = datetime.now().replace(second=0, microsecond=0)
     with app.app_context(), tenant_context(disabled=True):
         tenant = models.Tenant.query.filter_by(slug="demo").first()
         if not tenant:
             raise RuntimeError("缺少 demo 租户，请先运行 scripts/seeds/seed_shop.py")
+        if tenant.data_mode != 'demo':
+            raise RuntimeError('拒绝修改非演示模式的 demo 店铺')
         admin = models.User.query.filter_by(tenant_id=tenant.id, name="admin").first()
         products = models.Product.query.filter_by(tenant_id=tenant.id).order_by(models.Product.id.asc()).all()
         if not admin or not products:

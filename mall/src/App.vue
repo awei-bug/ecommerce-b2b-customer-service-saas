@@ -115,11 +115,14 @@ const shortShip = computed(() => {
 })
 
 function refreshAuth() {
-  customer.value = getCustomer()
+  const nextCustomer = getCustomer()
+  if (String(customer.value?.id || '') !== String(nextCustomer?.id || '')) csOpen.value = false
+  customer.value = nextCustomer
 }
 function onLogout() {
   clearAuth()
   customer.value = null
+  csOpen.value = false
   router.push('/')
 }
 function goFullAgent() {

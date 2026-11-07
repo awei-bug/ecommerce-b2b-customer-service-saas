@@ -27,6 +27,18 @@ from flask_shop.utils.freight import calc_order_freight
 from flask_shop.utils.money import money_add, money_float, money_mul
 
 
+@order_bp.route('/order/<int:id>/pay-proof/', methods=['GET'])
+@login_required
+def order_pay_proof(id):
+    from flask_shop.utils.pay_proof import send_order_proof
+    from flask_shop.utils.rbac import staff_has_permission
+
+    if not staff_has_permission('order:read'):
+        return '', 403
+    order = models.Order.query.filter_by(id=id, tenant_id=require_tenant_id()).first_or_404()
+    return send_order_proof(order)
+
+
 def _gen_order_no(tenant_id):
     ts = datetime.now().strftime('%Y%m%d%H%M%S')
     return f'O{tenant_id}{ts}{uuid.uuid4().hex[:6].upper()}'
@@ -569,8 +581,8 @@ def dashboard_kpi():
     assisted_paid = [row for row in assisted_orders if (row.status or '') in paid_like]
     assisted_gmv = round(sum(float(row.price or 0) for row in assisted_paid), 2)
 
-    waiting_service = sum(1 for row in support_rows if row.status == 'waiting')
-    active_service = sum(1 for row in support_rows if row.status == 'active')
+    waiting_service = models.SupportConversation.query.filter_by(tenant_id=tenant_id, status='waiting').count()
+    active_service = models.SupportConversation.query.filter_by(tenant_id=tenant_id, status='active').count()
     priority_items = []
     if claimed_pay_n:
         priority_items.append({
@@ -605,6 +617,21 @@ def dashboard_kpi():
 
     tenant = getattr(g, 'tenant', None)
     data_source = getattr(tenant, 'data_mode', None) or ('demo' if getattr(tenant, 'slug', None) == 'demo' else 'live')
+    setup = None
+    if staff_has_permission('shop:settings'):
+        published_categories = {
+            row[0] for row in db.session.query(models.StoreKnowledge.category).filter_by(
+                tenant_id=tenant_id, status='published'
+            ).distinct().all()
+        }
+        setup = {
+            'contact_configured': bool((getattr(tenant, 'contact_phone', None) or '').strip()),
+            'product_published': product_on > 0,
+            'policy_categories': sorted(published_categories.intersection({'payment', 'shipping', 'refund'})),
+            'can_edit_product': staff_has_permission('product:write'),
+            'can_edit_knowledge': staff_has_permission('service:manage'),
+            'can_edit_staff': staff_has_permission('user:write'),
+        }
 
     return {
         'status': 200,
@@ -634,6 +661,7 @@ def dashboard_kpi():
                 'low_stock': low_stock,
             },
             'orders_total': sum(by_status.values()),
+            'setup': setup,
             'by_status': by_status,
             'status_pie': status_pie,
             'trend_7d': trend_7d,
@@ -684,8 +712,13 @@ class Order(Resource):
 order_api.add_resource(Order, '/order/<int:id>/')
 
 
+def _locked_order(order_id):
+    return (models.Order.query.filter_by(id=order_id, tenant_id=require_tenant_id())
+            .populate_existing().with_for_update().first())
+
+
 def _do_transit(order_id, to_status, reason=None):
-    order = get_for_tenant(models.Order, order_id)
+    order = _locked_order(order_id)
     if not order:
         return None, ({'status': 404, 'msg': '订单不存在'}, 200)
     try:
@@ -702,9 +735,11 @@ def cancel_order(id):
     from flask_shop.utils.rbac import staff_has_permission
     if not staff_has_permission('order:cancel'):
         return {'status': 403, 'msg': '无权限取消订单'}
-    order = get_for_tenant(models.Order, id)
+    order = _locked_order(id)
     if not order:
         return {'status': 404, 'msg': '订单不存在'}
+    if order.status == CLOSED:
+        return {'status': 400, 'msg': '订单已关闭，不能重复取消'}
     body = request.get_json(silent=True) or {}
     reason = body.get('reason') or '用户取消'
     try:
@@ -731,7 +766,7 @@ def mark_order_paid(id):
     from flask_shop.utils.order_state import PAID
     if not staff_has_permission('order:mark_paid'):
         return {'status': 403, 'msg': '无权限标记已付款'}
-    order = get_for_tenant(models.Order, id)
+    order = _locked_order(id)
     if not order:
         return {'status': 404, 'msg': '订单不存在'}
     if order.status != PENDING_PAY:
@@ -777,7 +812,7 @@ def ship_order(id):
     from flask_shop.utils.rbac import staff_has_permission
     if not staff_has_permission('order:ship'):
         return {'status': 403, 'msg': '无权限发货'}
-    order = get_for_tenant(models.Order, id)
+    order = _locked_order(id)
     if not order:
         return {'status': 404, 'msg': '订单不存在'}
     try:
@@ -832,7 +867,7 @@ def reject_refund(id):
     from flask_shop.utils.rbac import staff_has_permission
     if not staff_has_permission('order:refund'):
         return {'status': 403, 'msg': '无权限操作售后'}
-    order = get_for_tenant(models.Order, id)
+    order = _locked_order(id)
     if not order:
         return {'status': 404, 'msg': '订单不存在'}
     if order.status != REFUNDING:
@@ -854,7 +889,7 @@ def approve_refund(id):
     from flask_shop.utils.rbac import staff_has_permission
     if not staff_has_permission('order:refund'):
         return {'status': 403, 'msg': '无权限操作售后'}
-    order = get_for_tenant(models.Order, id)
+    order = _locked_order(id)
     if not order:
         return {'status': 404, 'msg': '订单不存在'}
     if order.status != REFUNDING:

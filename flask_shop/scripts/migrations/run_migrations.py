@@ -89,6 +89,9 @@ def _run_one(path: Path) -> None:
     entry = getattr(module, "main", None) or getattr(module, "migrate", None)
     if entry is None or not callable(entry):
         raise MigrationError(f"{path.name} 既没有 main() 也没有 migrate()")
+    result = entry()
+    if result is not None and result != 0:
+        raise MigrationError(f"{path.name} 返回非零结果：{result}")
 
 
 def _ensure_history_table(db) -> None:
@@ -189,6 +192,11 @@ def main() -> int:
         for index, name in enumerate(targets, 1):
             print(f"  {index:>2}. {name}")
         return 0
+
+    print('[runner] 已暂停执行：历史版本未调用迁移入口，成功记录不能证明迁移已执行。')
+    print('[runner] 历史脚本的目标库、启动副作用和幂等性尚需逐项核验；请勿使用 --force 绕过。')
+    print('[runner] 请先备份，并在隔离实例审计 schema 和历史数据；--dry-run 仅显示顺序。')
+    return 2
 
     os.environ.setdefault("FLASK_CONFIG", "develop")
 

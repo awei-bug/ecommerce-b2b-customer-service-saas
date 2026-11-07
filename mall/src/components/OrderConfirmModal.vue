@@ -81,11 +81,11 @@
 
       <div class="pay-method">
         <button type="button" class="method active">
-          <span class="wx-icon">微</span>
-          微信支付
+          <span class="wx-icon">码</span>
+          商家收款码（人工确认）
         </button>
         <p v-if="!hasPayQr" class="pay-tip err">店主尚未上传收款码，暂时不能在线扫码。请联系店主后再下单。</p>
-        <p v-else class="pay-tip">点击「去支付」后将生成订单并展示收款码；请备注订单号。</p>
+        <p v-else class="pay-tip">点击「去支付」后将生成订单并展示商家收款码；请备注订单号，付款后等待商家确认。</p>
       </div>
 
       <div class="footer">

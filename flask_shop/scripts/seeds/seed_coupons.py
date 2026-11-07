@@ -6,10 +6,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
-os.environ.pop("DATABASE_URL", None)
 from dotenv import load_dotenv
-load_dotenv(ROOT / ".env", override=True)
+load_dotenv(ROOT / ".env", override=False)
 from flask_shop import create_app, db, models
+from flask_shop.utils.demo_seed import reject_production_demo_seed
 from flask_shop.utils.tenant_query import tenant_context
 
 DEFAULTS = [
@@ -18,6 +18,7 @@ DEFAULTS = [
 ]
 
 def main():
+    reject_production_demo_seed()
     app = create_app(os.getenv("FLASK_CONFIG") or "develop")
     with app.app_context():
         db.create_all()
@@ -25,6 +26,8 @@ def main():
             t = models.Tenant.query.filter_by(slug="demo").first()
             if not t:
                 print("no demo"); return 1
+            if t.data_mode != 'demo':
+                print('拒绝修改非演示模式的 demo 店铺'); return 1
             n = 0
             for d in DEFAULTS:
                 exists = models.Coupon.query.filter_by(tenant_id=t.id, name=d["name"]).first()

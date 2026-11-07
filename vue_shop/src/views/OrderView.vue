@@ -225,7 +225,8 @@
                 <el-descriptions-item label="顾客申报">{{ detail.buyer_paid_claimed ? '已报付款' : '-' }}</el-descriptions-item>
                 <el-descriptions-item label="申报备注">{{ detail.buyer_paid_note || '-' }}</el-descriptions-item>
                 <el-descriptions-item v-if="detail.buyer_paid_proof" label="付款截图" :span="2">
-                    <img :src="mediaUrl(detail.buyer_paid_proof)" alt="付款截图" style="max-width:100%;max-height:240px;border-radius:8px" />
+                    <img v-if="proofSrc" :src="proofSrc" alt="付款截图" style="max-width:100%;max-height:240px;border-radius:8px" />
+                    <span v-else>{{ proofError ? '付款截图加载失败' : '正在加载付款截图…' }}</span>
                 </el-descriptions-item>
             </el-descriptions>
             <h4 style="margin-top: 16px">明细</h4>
@@ -293,7 +294,7 @@
 
 <script setup>
 import { ArrowRight, Search } from '@element-plus/icons-vue'
-import { onMounted, reactive, ref, computed, watch } from 'vue'
+import { onMounted, onUnmounted, reactive, ref, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api/index'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -363,6 +364,28 @@ const expressInfo = reactive({ data: [] })
 
 const detailVisible = ref(false)
 const detail = ref(null)
+const proofSrc = ref('')
+const proofError = ref(false)
+let proofVersion = 0
+function clearProof() {
+    if (proofSrc.value) URL.revokeObjectURL(proofSrc.value)
+    proofSrc.value = ''
+}
+watch(() => [detailVisible.value, detail.value?.id, detail.value?.buyer_paid_proof], async ([visible, id, proof]) => {
+    const version = ++proofVersion
+    clearProof()
+    proofError.value = false
+    if (!visible || !id || !proof) return
+    try {
+        const response = await api.get_order_pay_proof(id)
+        if (version !== proofVersion) return
+        if (!(response.data instanceof Blob) || !response.data.type.startsWith('image/')) throw new Error('invalid image')
+        proofSrc.value = URL.createObjectURL(response.data)
+    } catch (_) {
+        if (version === proofVersion) proofError.value = true
+    }
+}, { immediate: true })
+onUnmounted(() => { proofVersion++; clearProof() })
 
 const shipVisible = ref(false)
 const shipForm = reactive({ id: null, content: '' })
@@ -514,13 +537,6 @@ const showExpress = (id) => {
     })
 }
 
-function mediaUrl(path) {
-    if (!path) return ''
-    const s = String(path)
-    if (s.startsWith('http://') || s.startsWith('https://')) return s
-    const base = (process.env.VUE_APP_API || '').replace(/\/$/, '')
-    return base + (s.startsWith('/') ? s : '/' + s)
-}
 const showDetail = (row) => {
     api.get_order(row.id).then((res) => {
         if (toast(res, '已加载详情')) {

@@ -1,10 +1,13 @@
 import csv
 from datetime import date
+from decimal import Decimal
 
 from openpyxl import load_workbook
+import pytest
 
 from flask_shop import db, models
 from flask_shop.utils.tenant_query import tenant_context
+from flask_shop.tenant_onboarding import OnboardingError, _integer, _money
 
 
 def _create_live_tenant(app, slug="client-shop"):
@@ -20,6 +23,171 @@ def _create_live_tenant(app, slug="client-shop"):
     ])
     assert result.exit_code == 0, result.output
     return runner
+
+
+def test_platform_create_uses_formal_onboarding_and_rejects_weak_input(app):
+    app.config['PLATFORM_BOOTSTRAP_KEY'] = 'platform-test-secret-key'
+    app.config['PLATFORM_API_ENABLED'] = True
+    client = app.test_client()
+    headers = {'X-Platform-Key': 'platform-test-secret-key'}
+    payload = {'slug': 'platform-shop', 'name': '正式商家', 'admin_name': 'owner',
+               'admin_password': 'StrongPass_2026', 'admin_phone': '13800000000',
+               'admin_email': 'owner@example.test'}
+
+    assert client.post('/api/p/tenants/', json=payload).get_json()['status'] == 401
+    assert client.post('/api/p/tenants/', json=payload, headers={'X-Platform-Key': '错误密钥'}).get_json()['status'] == 401
+    assert client.post('/api/p/tenants/', json={**payload, 'admin_password': 'password'}, headers=headers).get_json()['status'] == 400
+    assert client.post('/api/p/tenants/', json={**payload, 'slug': 'demo-unsafe'}, headers=headers).get_json()['status'] == 400
+    assert client.post('/api/p/tenants/', json={**payload, 'admin_name': ['invalid']}, headers=headers).get_json()['status'] == 400
+    response = client.post('/api/p/tenants/', json=payload, headers=headers).get_json()
+    assert response['status'] == 200
+    assert client.post('/api/p/tenants/', json=payload, headers=headers).get_json()['status'] == 400
+
+    with app.app_context(), tenant_context(disabled=True):
+        tenant = models.Tenant.query.filter_by(slug='platform-shop').one()
+        user = models.User.query.filter_by(tenant_id=tenant.id, name='owner').one()
+        assert tenant.data_mode == 'live'
+        assert user.is_admin == 1 and user.role.is_super == 1
+        assert user.check_password(payload['admin_password'])
+        assert user.phone == payload['admin_phone'] and user.email == payload['admin_email']
+        assert models.FreightTemplate.query.filter_by(tenant_id=tenant.id, is_default=1).count() == 1
+        assert user.role.menus
+
+    login = client.post('/user/login/', json={
+        'tenant_slug': 'platform-shop', 'name': 'owner', 'pwd': payload['admin_password'],
+    }).get_json()
+    assert login['status'] == 200
+
+
+def test_disabled_platform_api_rejects_even_valid_key_without_changes(app):
+    app.config['PLATFORM_BOOTSTRAP_KEY'] = 'platform-test-secret-key'
+    app.config['PLATFORM_API_ENABLED'] = False
+    client = app.test_client()
+    headers = {'X-Platform-Key': 'platform-test-secret-key'}
+    payload = {'slug': 'disabled-shop', 'name': '正式商家', 'admin_name': 'owner',
+               'admin_password': 'StrongPass_2026'}
+    for method, path, body in [
+        ('post', '/api/p/tenants/', payload),
+        ('get', '/api/p/tenants/', None),
+        ('post', '/api/p/tenants/1/status/', {'status': 0}),
+    ]:
+        response = getattr(client, method)(path, json=body, headers=headers)
+        assert response.status_code == 403
+        assert response.get_json()['status'] == 403
+    with app.app_context(), tenant_context(disabled=True):
+        assert not models.Tenant.query.filter_by(slug='disabled-shop').first()
+        assert models.Tenant.query.filter_by(slug='test-a').one().status == 1
+
+
+@pytest.mark.parametrize('value', ['NaN', 'Infinity', '-Infinity', '10000000000', '0.004'])
+def test_import_rejects_invalid_or_unrepresentable_prices(value):
+    with pytest.raises(OnboardingError):
+        _money(value, '价格', allow_zero=False)
+
+
+@pytest.mark.parametrize('value', ['1.5', '-1', 'NaN', 'Infinity', '2147483648', '1e1000'])
+def test_import_rejects_invalid_or_unrepresentable_integer(value):
+    with pytest.raises(OnboardingError):
+        _integer(value, '库存')
+
+
+def test_import_numeric_rounding_matches_money_policy():
+    assert _money('1.005', '价格') == Decimal('1.01')
+    assert _integer('2.0', '库存') == 2
+
+
+def test_staff_import_errors_never_echo_password(app, tmp_path):
+    runner = _create_live_tenant(app, slug='redaction-shop')
+    source = tmp_path / 'staff.csv'
+    secret = 'StaffPassword_2026'
+    with source.open('w', encoding='utf-8-sig', newline='') as handle:
+        writer = csv.DictWriter(handle, fieldnames=['username', 'password', '密码', 'token'])
+        writer.writeheader()
+        writer.writerow({'username': '!', 'password': secret, '密码': secret, 'token': secret})
+    result = runner.invoke(args=['tenant', 'import-data', '--slug', 'redaction-shop',
+                                 '--file', str(source), '--kind', 'staff'])
+    report = source.with_name('staff.errors.csv')
+    assert result.exit_code == 1
+    assert secret not in result.output
+    assert secret not in report.read_text(encoding='utf-8-sig')
+    assert '[已隐藏]' in report.read_text(encoding='utf-8-sig')
+
+
+@pytest.mark.parametrize('dry_run', [True, False])
+def test_import_rolls_back_failed_rows_and_redacts_exception(app, monkeypatch, dry_run):
+    from flask_shop import tenant_onboarding
+
+    _create_live_tenant(app, slug='rollback-shop')
+    secret = 'secret-value-to-protect'
+
+    def importer(tenant_id, row):
+        product = models.Product.query.filter_by(tenant_id=tenant_id, name='恢复后的商品').first()
+        if product:
+            raise AssertionError('失败行遗留了商品')
+        product = models.Product(tenant_id=tenant_id, name='恢复后的商品', price=1, number=1)
+        db.session.add(product)
+        db.session.flush()
+        if row.get('fail'):
+            raise ValueError(f'处理失败：{row["password"]}')
+        return product
+
+    monkeypatch.setitem(tenant_onboarding.IMPORTERS, 'products', importer)
+    with app.app_context(), tenant_context(disabled=True):
+        tenant = models.Tenant.query.filter_by(slug='rollback-shop').one()
+        tenant_id = tenant.id
+        db.session.commit()
+        result = tenant_onboarding.import_initial_data('rollback-shop', {'products': [
+            {'fail': True, 'password': secret}, {'fail': False},
+        ]}, dry_run=dry_run)
+        assert result['error_count'] == 1
+        assert result['created_count'] == 1
+        assert secret not in str(result)
+        assert '[已隐藏]' in result['errors'][0]['reason']
+        assert models.Product.query.filter_by(tenant_id=tenant_id, name='恢复后的商品').count() == (0 if dry_run else 1)
+
+
+@pytest.mark.parametrize('dry_run', [True, False])
+def test_import_continues_after_database_constraint_failure(app, monkeypatch, dry_run):
+    from flask_shop import tenant_onboarding
+
+    _create_live_tenant(app, slug='constraint-shop')
+
+    def importer(tenant_id, row):
+        if row.get('fail'):
+            db.session.add(models.User(tenant_id=tenant_id, name='owner'))
+            db.session.flush()
+        product = models.Product(tenant_id=tenant_id, name='下一行商品', price=1, number=1)
+        db.session.add(product)
+        db.session.flush()
+        return product
+
+    monkeypatch.setitem(tenant_onboarding.IMPORTERS, 'products', importer)
+    with app.app_context(), tenant_context(disabled=True):
+        tenant_id = models.Tenant.query.filter_by(slug='constraint-shop').one().id
+        db.session.commit()
+        result = tenant_onboarding.import_initial_data('constraint-shop', {'products': [
+            {'fail': True}, {'fail': False},
+        ]}, dry_run=dry_run)
+        assert result['error_count'] == 1 and result['created_count'] == 1
+        assert models.Product.query.filter_by(tenant_id=tenant_id, name='下一行商品').count() == (0 if dry_run else 1)
+
+
+def test_import_rejects_zero_quantity_and_overflow_without_creating_orders(app):
+    from flask_shop.tenant_onboarding import import_initial_data
+
+    _create_live_tenant(app, slug='numeric-shop')
+    with app.app_context(), tenant_context(disabled=True):
+        tenant = models.Tenant.query.filter_by(slug='numeric-shop').one()
+        db.session.add(models.Product(tenant_id=tenant.id, name='商品', price=100, number=2))
+        db.session.commit()
+        base = {'customer_phone': '13800000000', 'product_name': '商品', 'unit_price': '9999999999.99'}
+        result = import_initial_data('numeric-shop', {'orders': [
+            {**base, 'order_no': 'ZERO', 'quantity': 0},
+            {**base, 'order_no': 'OVERFLOW', 'quantity': 2},
+        ]})
+        assert result['error_count'] == 2
+        assert models.Order.query.filter_by(tenant_id=tenant.id).count() == 0
+        assert models.Customer.query.filter_by(tenant_id=tenant.id).count() == 0
 
 
 def test_formal_tenant_full_onboarding_and_live_dashboard(app, tmp_path):

@@ -206,7 +206,6 @@ async function onLogin() {
     }
     const d = res.data || {}
     saveAuth({ token: d.token, customer: d.customer })
-    window.dispatchEvent(new Event('mall:auth-change'))
     const redirect = route.query.redirect ? String(route.query.redirect) : '/'
     router.replace(redirect)
   } catch (e) {

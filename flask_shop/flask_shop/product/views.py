@@ -740,6 +740,123 @@ def download_sample_listing_pack():
     )
 
 
+@product_bp.route('/products/hub/overview/', methods=['GET'])
+@login_required
+def hub_sync_overview():
+    """Local records and latest recorded cycle for the configured demo store only."""
+    import json
+    from sqlalchemy import and_, select
+    from flask_shop.utils.rbac import staff_has_permission
+
+    if not staff_has_permission('product:write'):
+        return {'status': 403, 'msg': '无权限管理商品'}
+    tenant_id = require_tenant_id()
+    tenant = db.session.get(models.Tenant, tenant_id)
+    if (not tenant or tenant.data_mode != 'demo' or tenant.status != 1 or
+            not current_app.config.get('DATA_HUB_URL') or
+            tenant.slug != (current_app.config.get('DATA_HUB_TENANT_SLUG') or '')):
+        return {'status': 200, 'msg': 'ok', 'data': {'available': False}}
+    # Explicit tenant predicates on both sides keep unbound knowledge rows in the outer join.
+    stmt = (select(models.ProductKnowledge, models.Product)
+            .outerjoin(models.Product, and_(models.Product.id == models.ProductKnowledge.product_id,
+                                          models.Product.tenant_id == tenant_id))
+            .where(models.ProductKnowledge.tenant_id == tenant_id)
+            .order_by(models.ProductKnowledge.synced_at.desc(), models.ProductKnowledge.id.desc())
+            .limit(50))
+    rows = db.session.execute(stmt).all()
+    items = []
+    for knowledge, product in rows:
+        if product is None:
+            state = 'pending_price' if not knowledge.product_id and knowledge.status == 'pending_price' else 'unavailable'
+        else:
+            state = 'published' if product.state == 2 else 'draft'
+        items.append({'knowledge_id': knowledge.id, 'external_id': knowledge.external_id, 'name': product.name if product else knowledge.title,
+                      'product_id': product.id if product else None, 'state': state,
+                      'synced_at': knowledge.synced_at.isoformat() if knowledge.synced_at else None})
+    latest = (models.AuditLog.query.filter_by(tenant_id=tenant_id, action='product.hub_auto_sync')
+              .order_by(models.AuditLog.id.desc()).first())
+    cycle = None
+    if latest:
+        try:
+            parsed = json.loads(latest.detail or '{}')
+            if isinstance(parsed, dict) and parsed.get('status') in ('success', 'partial', 'failed'):
+                issue_messages = {
+                    'missing_id': '缺少商品 ID，请检查内容平台商品数据。',
+                    'missing_title': '缺少商品名称，请在内容平台补充后重试。',
+                    'invalid_link': '商品关联异常，请联系管理员核对。',
+                    'name_conflict': '本店存在同名商品，请核对并修改名称后等待下一轮同步。',
+                    'quota': '商品数量已达套餐上限，请检查商品配额。',
+                    'processing_error': '商品处理失败，请联系管理员查看服务日志。',
+                }
+                failure_messages = {'hub_unavailable': '数据中心连接或响应异常，请检查连接和租户配置。',
+                                    'invalid_config': '自动同步配置或演示租户不可用，请检查配置。',
+                                    'other': '同步未完成，请联系管理员查看服务日志。'}
+                issues = parsed.get('issues') if isinstance(parsed.get('issues'), list) else []
+                cycle = {'status': parsed['status'], 'created': parsed.get('created', 0),
+                         'updated': parsed.get('updated', 0), 'pending': parsed.get('pending', 0),
+                         'errors': parsed.get('errors', 0),
+                         'issues': [{'external_id': str(row.get('id') or '')[:128],
+                                     'message': issue_messages.get(row.get('code'), issue_messages['processing_error'])}
+                                    for row in issues[:3] if isinstance(row, dict)],
+                         'issues_truncated': bool(parsed.get('issues_truncated')),
+                         'failure_message': failure_messages.get(parsed.get('failure_code'), failure_messages['other']) if parsed['status'] == 'failed' else '',
+                         'recorded_at': latest.create_time.isoformat() if latest.create_time else None}
+        except (TypeError, ValueError):
+            pass
+    return {'status': 200, 'msg': 'ok', 'data': {'available': True, 'last_cycle': cycle, 'items': items}}
+
+
+@product_bp.route('/products/hub/pending/<int:knowledge_id>/price/', methods=['POST'])
+@login_required
+def hub_pending_price(knowledge_id):
+    """Create a local draft from a pending-price knowledge card, after explicit confirmation."""
+    from decimal import Decimal, InvalidOperation
+    from flask_shop.utils import hub_sync
+    from flask_shop.utils.audit import write_audit
+    from flask_shop.utils.rbac import staff_has_permission
+    from flask_shop.utils.tenant_query import tenant_context
+
+    if not staff_has_permission('product:write'):
+        return {'status': 403, 'msg': '无权限管理商品'}
+    tenant_id = require_tenant_id()
+    tenant = db.session.get(models.Tenant, tenant_id)
+    if (not tenant or tenant.data_mode != 'demo' or tenant.status != 1 or
+            not current_app.config.get('DATA_HUB_URL') or
+            tenant.slug != (current_app.config.get('DATA_HUB_TENANT_SLUG') or '')):
+        return {'status': 403, 'msg': '当前店铺未启用演示商品同步'}
+    raw = (request.get_json(silent=True) or {}).get('price')
+    try:
+        price = Decimal(str(raw)) if not isinstance(raw, bool) else Decimal('NaN')
+        if not price.is_finite() or price < Decimal('0.01') or price > Decimal('9999999999.99') or price != price.quantize(Decimal('0.01')):
+            raise ValueError('invalid price')
+    except (InvalidOperation, ValueError, TypeError):
+        return {'status': 400, 'msg': '售价须为大于零、最多两位小数的金额'}
+
+    try:
+        with tenant_context(tenant_id=tenant_id):
+            knowledge = (models.ProductKnowledge.query.filter_by(id=knowledge_id, tenant_id=tenant_id)
+                         .populate_existing().with_for_update().first())
+            if not knowledge:
+                return {'status': 404, 'msg': '待补价商品不存在'}
+            if knowledge.status != 'pending_price' or knowledge.product_id:
+                return {'status': 409, 'msg': '该商品已处理，请刷新记录'}
+            item = knowledge.knowledge()
+            if not isinstance(item, dict) or item.get('external_id') != knowledge.external_id:
+                return {'status': 409, 'msg': '商品知识不完整，请重新同步后重试'}
+            item.update(price=str(price), content_hash=knowledge.content_hash, version=knowledge.version)
+            result = hub_sync._apply_item(tenant_id, item, publish=False, safe_existing=True)
+            if result.get('action') != 'created':
+                db.session.rollback()
+                return {'status': 409, 'msg': result.get('message') or '商品状态已变化，请刷新后重试'}
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception('hub pending price failed')
+        return {'status': 500, 'msg': '创建商品草稿失败，请稍后重试'}
+    write_audit('product.hub_pending_price', 'product', result['product_id'], 'created draft', tenant_id=tenant_id)
+    return {'status': 200, 'msg': '已创建商品草稿，请核对后上架', 'data': {'product_id': result['product_id']}}
+
+
 @product_bp.route('/products/hub/status/', methods=['GET'])
 @login_required
 def hub_sync_status():
@@ -749,6 +866,10 @@ def hub_sync_status():
 
     if not staff_has_permission('product:write'):
         return {'status': 403, 'msg': '无权限'}
+
+    tenant = db.session.get(models.Tenant, require_tenant_id())
+    if not tenant or tenant.slug != (current_app.config.get('DATA_HUB_TENANT_SLUG') or ''):
+        return {'status': 403, 'msg': '当前店铺未配置数据中心'}
 
     data = {
         'enabled': hub_client.hub_enabled(),
@@ -785,6 +906,8 @@ def hub_sync_products():
     tenant = db.session.get(models.Tenant, tenant_id)
     if not tenant:
         return {'status': 404, 'msg': '租户不存在'}
+    if tenant.slug != (current_app.config.get('DATA_HUB_TENANT_SLUG') or ''):
+        return {'status': 403, 'msg': '当前店铺未配置数据中心'}
 
     body = request.get_json(silent=True) or {}
     try:

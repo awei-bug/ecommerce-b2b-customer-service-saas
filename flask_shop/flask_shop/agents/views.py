@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from flask import Blueprint, current_app, g, request
 
-from flask_shop.agents.orchestrator import orchestrator
+from flask_shop.agents.orchestrator import human_fallback, orchestrator
 import json
 import time
 from flask_shop.agents.memory import get_session, save_session, resolve_followup
@@ -39,6 +39,53 @@ def _resolve_tenant_slug():
     return (slug or "demo").strip()
 
 
+def _customer_identity(tenant_id):
+    from flask_shop import models
+
+    token = _extract_token()
+    if not token:
+        return None, None
+    payload = verify_token(token)
+    if not payload or payload.get("typ") != "customer":
+        return None, ({"status": 401, "msg": "登录已失效，请重新登录"}, 401)
+    try:
+        token_tenant_id = int(payload.get("tenant_id") or 0)
+        token_customer_id = int(payload.get("customer_id") or payload.get("id") or 0)
+    except (TypeError, ValueError):
+        return None, ({"status": 401, "msg": "登录信息无效，请重新登录"}, 401)
+    if token_tenant_id != tenant_id:
+        return None, ({"status": 403, "msg": "登录身份与店铺不一致"}, 403)
+    customer = models.Customer.query.filter_by(id=token_customer_id, tenant_id=tenant_id, status=1).first()
+    if not customer:
+        return None, ({"status": 401, "msg": "顾客账号不存在或已停用"}, 401)
+    return customer.id, None
+
+
+def _support_queue_result(session_id, conversation, customer_message_id):
+    messages = {
+        "active": "人工客服正在处理，请稍候。",
+        "waiting": "消息已进入人工客服队列，请稍候。",
+        "resolved": "人工服务已结束，请重新发送问题。",
+    }
+    return {
+        "status": 200,
+        "msg": "ok",
+        "data": {
+            "session_id": session_id,
+            "customer_message_id": customer_message_id,
+            "reply": messages.get(conversation.status, "会话状态已变化，请重新发送问题。"),
+            "intent": {"intent": "cs", "label": "人工客服"},
+            "products": [],
+            "actions": [],
+            "need_human": conversation.status in ("waiting", "active"),
+            "blocked": False,
+            "agents_ran": ["support_queue"],
+            "suggested_replies": [],
+            "support": conversation.to_dict(include_people=False),
+        },
+    }
+
+
 @agents_bp.route("/health/", methods=["GET"])
 def agents_health():
     from flask_shop.agents.tools import agnes_client
@@ -65,16 +112,18 @@ def agents_health():
 @agents_bp.route("/chat/", methods=["POST"])
 @rate_limit(max_calls=40, per_seconds=60, prefix="agents_chat")
 def agents_chat():
-    body = request.get_json(silent=True) or {}
-    text = (body.get("text") or body.get("message") or "").strip()
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return {"status": 400, "msg": "请求体必须是 JSON 对象"}, 400
+    raw_text = body.get("text") or body.get("message") or ""
+    if not isinstance(raw_text, str):
+        return {"status": 400, "msg": "消息内容必须是文字"}, 400
+    text = raw_text.strip()
     if not text:
         return {"status": 400, "msg": "请输入内容"}
-
-    customer_id = getattr(g, "customer_id", None)
-    if not customer_id:
-        payload = verify_token(_extract_token())
-        if payload and payload.get("typ") == "customer":
-            customer_id = payload.get("customer_id") or payload.get("id")
+    if len(text) > 8000:
+        return {"status": 400, "msg": "消息内容不能超过 8000 字"}, 400
+    user_text = text
 
     slug = _resolve_tenant_slug()
     tenant_id = getattr(g, "tenant_id", None)
@@ -87,44 +136,56 @@ def agents_chat():
         # 走隔离层自动过滤。未绑定的话 TENANT_STRICT=1 会直接拦截，
         # 生产环境则静默失去自动隔离保护。
         with tenant_context(disabled=True):
-            tenant = models.Tenant.query.filter_by(slug=slug).first()
+            tenant = models.Tenant.query.filter_by(slug=slug, status=1).first()
         if tenant is not None:
             bind_tenant(tenant)
             tenant_id = tenant.id
 
-    t0 = time.time()
-    session_id = (body.get("session_id") or "").strip() or uuid.uuid4().hex
+    if tenant_id is None:
+        return {"status": 404, "msg": "店铺不存在"}, 404
 
-    # 人工已接管或正在排队时，顾客消息只进入人工时间线，避免 AI 抢答。
+    customer_id, identity_error = _customer_identity(tenant_id)
+    if identity_error:
+        return identity_error
+
+    t0 = time.time()
+    raw_session_id = body.get("session_id") or ""
+    if not isinstance(raw_session_id, str) or len(raw_session_id.strip()) > 64:
+        return {"status": 400, "msg": "会话标识无效"}, 400
+    session_id = raw_session_id.strip() or uuid.uuid4().hex
+
+    initial_status = None
+    initial_resolved_at = None
     if tenant_id is not None:
         try:
             from flask_shop.agents import support
 
             support_row = support.get_conversation(tenant_id, session_id)
+            if support_row and support_row.customer_id and support_row.customer_id != customer_id:
+                return {"status": 403, "msg": "无权访问该会话"}, 403
+            if support_row:
+                initial_status = support_row.status
+                initial_resolved_at = support_row.resolved_at
             if support_row and support_row.status in ("waiting", "active"):
-                support.persist_customer_waiting_message(support_row, text, int(customer_id) if customer_id else None)
-                state_text = "人工客服正在处理，请稍候。" if support_row.status == "active" else "消息已进入人工客服队列，请稍候。"
-                return {
-                    "status": 200,
-                    "msg": "ok",
-                    "data": {
-                        "session_id": session_id,
-                        "reply": state_text,
-                        "intent": {"intent": "cs", "label": "人工客服"},
-                        "products": [],
-                        "actions": [],
-                        "need_human": True,
-                        "blocked": False,
-                        "agents_ran": ["support_queue"],
-                        "suggested_replies": [],
-                        "support": support_row.to_dict(include_people=False),
-                    },
-                }
+                waiting_result = support.persist_customer_waiting_message(support_row, text, customer_id)
+                if waiting_result is None:
+                    return {"status": 409, "msg": "会话状态已变化，请重新发送问题"}, 409
+                support_row, customer_message_id = waiting_result
+                return _support_queue_result(session_id, support_row, customer_message_id)
+        except PermissionError:
+            from flask_shop import db
+            db.session.rollback()
+            return {"status": 403, "msg": "无权访问该会话"}, 403
         except Exception:
-            # 不能静默：这里失败意味着人工接管状态读不到，AI 会在人工已接管时抢答。
-            current_app.logger.exception("人工客服状态检查失败，AI 将按未接管处理")
+            current_app.logger.exception("人工客服状态检查失败，拒绝处理以避免抢答")
+            from flask_shop import db
+            db.session.rollback()
+            return {"status": 503, "msg": "客服状态暂不可用，请稍后重试"}, 503
 
-    sess = get_session(session_id)
+    memory_key = f"{tenant_id}:{session_id}"
+    sess = get_session(memory_key)
+    prior_followup = resolve_followup(text, sess)
+    refresh_failed = False
     persistent_memory = {}
     if tenant_id is not None:
         try:
@@ -134,30 +195,65 @@ def agents_chat():
             )
             if not sess.get("last_products") and persistent_memory.get("last_products"):
                 sess["last_products"] = persistent_memory.get("last_products")
+                prior_followup = resolve_followup(text, sess)
+            session_products, remembered_products = support.refresh_product_slots(
+                tenant_id, sess.get("last_products"), persistent_memory.get("last_products")
+            )
+            sess["last_products"] = session_products
+            persistent_memory["last_products"] = [item for item in remembered_products if item]
+            persistent_memory["summary"] = ""
+            persistent_memory["recent_turns"] = [
+                turn for turn in persistent_memory.get("recent_turns", [])
+                if isinstance(turn, dict) and turn.get("role") == "user"
+            ]
+            preferences = persistent_memory.get("preferences")
+            if isinstance(preferences, dict):
+                preferences.pop("last_product_names", None)
         except Exception:
+            from flask_shop import db
+            db.session.rollback()
+            refresh_failed = True
+            sess["last_products"] = []
             persistent_memory = {}
     follow = resolve_followup(text, sess)
-    if follow.get("is_followup") and follow.get("product"):
+    unavailable = (follow.get("is_followup") and not follow.get("product")) or (
+        refresh_failed and prior_followup.get("is_followup")
+    )
+    out_of_stock = bool(follow.get("product") and follow["product"].get("in_stock") is False)
+    if follow.get("is_followup") and follow.get("product") and not out_of_stock:
         p = follow["product"]
         # rewrite user text to concrete product ask for order guidance
-        text = f"我想购买商品「{p.get('name')}」(id={p.get('id')}, 价格{p.get('price')})，请告诉我怎么下单付款"
+        text = f"我想购买商品「{p.get('name')}」(id={p.get('id')}, 价格{p.get('price')}, 库存{p.get('stock')})，请告诉我怎么下单付款"
 
-    result = orchestrator.run_chat(
-        text,
-        tenant_slug=slug,
-        tenant_id=tenant_id,
-        customer_id=int(customer_id) if customer_id else None,
-        channel="mall_chat",
-        memory=persistent_memory,
-    )
+    if unavailable or out_of_stock:
+        reply = ("这件商品目前缺货，请重新查看商品列表，或联系店长确认。" if out_of_stock else
+                 "之前推荐的商品已下架或暂时无法确认，请重新查看商品列表，或联系店长。")
+        result = {"status": 200, "msg": "ok", "data": {
+            "reply": reply, "intent": {"intent": "cs", "label": "商品状态确认"},
+            "products": [], "actions": [], "need_human": False, "blocked": False,
+            "agents_ran": ["availability_guard"], "suggested_replies": ["有什么货", "转店长"],
+        }}
+    else:
+        try:
+            result = orchestrator.run_chat(
+                text,
+                tenant_slug=slug,
+                tenant_id=tenant_id,
+                customer_id=int(customer_id) if customer_id else None,
+                channel="mall_chat",
+                memory=persistent_memory,
+            )
+            if (not isinstance(result, dict) or result.get("status") != 200
+                    or not isinstance(result.get("data"), dict)
+                    or not isinstance(result["data"].get("reply"), str)
+                    or not result["data"]["reply"].strip()):
+                result = human_fallback()
+        except Exception:
+            from flask_shop import db
+            db.session.rollback()
+            current_app.logger.exception("自动客服执行失败，尝试转人工")
+            result = human_fallback()
     data = (result or {}).get("data") or {}
-    save_session(
-        session_id,
-        user_text=body.get("text") or text,
-        reply=data.get("reply") or "",
-        products=data.get("products") or sess.get("last_products") or [],
-        intent=data.get("intent") or {},
-    )
     if isinstance(result, dict) and isinstance(result.get("data"), dict):
         result["data"]["session_id"] = session_id
         if follow.get("is_followup"):
@@ -166,23 +262,39 @@ def agents_chat():
             try:
                 from flask_shop.agents import support
 
-                support_row = support.persist_agent_turn(
+                support_row, ai_accepted, customer_message_id, ai_message_id = support.persist_agent_turn(
                     tenant_id=tenant_id,
                     session_id=session_id,
                     customer_id=int(customer_id) if customer_id else None,
-                    user_text=body.get("text") or text,
+                    user_text=user_text,
                     result=result,
+                    initial_status=initial_status,
+                    initial_resolved_at=initial_resolved_at,
                 )
+                if not ai_accepted:
+                    return _support_queue_result(session_id, support_row, customer_message_id)
+                result["data"]["customer_message_id"] = customer_message_id
+                result["data"]["ai_message_id"] = ai_message_id
                 result["data"]["support"] = support_row.to_dict(include_people=False)
+                save_session(
+                    memory_key,
+                    user_text=user_text,
+                    reply=data.get("reply") or "",
+                    products=data.get("products") or sess.get("last_products") or [],
+                    intent=data.get("intent") or {},
+                )
+            except PermissionError:
+                from flask_shop import db
+                db.session.rollback()
+                return {"status": 403, "msg": "无权访问该会话"}, 403
             except Exception:
-                try:
-                    from flask_shop import db
-                    db.session.rollback()
-                except Exception:
-                    pass
+                from flask_shop import db
+                db.session.rollback()
+                current_app.logger.exception("保存客服回复失败")
+                return {"status": 503, "msg": "客服服务暂不可用，请稍后重试"}, 503
     _persist_trace(
         result,
-        text=body.get("text") or text,
+        text=user_text,
         session_id=session_id,
         channel="mall_chat",
         tenant_id=tenant_id,
@@ -462,30 +574,34 @@ def _support_customer_context(session_id):
     row = support.get_conversation(tenant.id, session_id)
     if not row:
         return None, ({"status": 404, "msg": "会话不存在"}, 404)
-    payload = verify_token(_extract_token())
-    customer_id = None
-    if payload and payload.get("typ") == "customer" and int(payload.get("tenant_id") or 0) == int(tenant.id):
-        customer_id = int(payload.get("customer_id") or payload.get("id") or 0) or None
+    customer_id, identity_error = _customer_identity(tenant.id)
+    if identity_error:
+        return None, identity_error
     if row.customer_id and row.customer_id != customer_id:
         return None, ({"status": 403, "msg": "无权访问该会话"}, 403)
+    g.support_customer_id = customer_id
     return row, None
 
 
 @agents_bp.route("/support/session/<session_id>/messages/", methods=["GET"])
 def support_customer_messages(session_id):
     from flask_shop import models
+    from flask_shop.agents import support
 
     row, error = _support_customer_context(session_id)
     if error:
         return error
     after_id = max(int(request.args.get("after_id") or 0), 0)
-    messages = row.messages.filter(models.SupportMessage.id > after_id).order_by(models.SupportMessage.id.asc()).limit(100).all()
+    messages = row.messages.filter(models.SupportMessage.id > after_id).order_by(models.SupportMessage.id.asc()).limit(101).all()
     return {
         "status": 200,
         "msg": "ok",
         "data": {
             "conversation": row.to_dict(include_people=False),
-            "messages": [item.to_dict() for item in messages],
+            "messages": support.customer_history_messages(
+                row.tenant_id, g.support_customer_id, messages[:100], g.tenant.contact_phone,
+            ),
+            "has_more": len(messages) > 100,
         },
     }
 
@@ -815,12 +931,14 @@ def support_inbox():
 @permission_required("service:read")
 def support_conversation_detail(conversation_id):
     from flask_shop import models
+    from flask_shop.utils.rbac import staff_has_permission
 
     row = _support_row(conversation_id)
     if not row:
         return {"status": 404, "msg": "会话不存在"}
     orders = []
-    if row.customer_id:
+    can_read_orders = staff_has_permission('order:read')
+    if can_read_orders and row.customer_id:
         orders = models.Order.query.filter_by(
             tenant_id=g.tenant_id,
             customer_id=row.customer_id,
@@ -831,7 +949,9 @@ def support_conversation_detail(conversation_id):
         "data": {
             "conversation": row.to_dict(),
             "messages": [item.to_dict() for item in row.messages.order_by(models.SupportMessage.id.asc()).limit(500).all()],
-            "orders": [item.to_dict() for item in orders],
+            "orders": [{"id": item.id, "order_no": item.order_no, "status": item.status,
+                        "price": float(item.price or 0)} for item in orders],
+            "orders_allowed": can_read_orders,
         },
     }
 
@@ -846,11 +966,12 @@ def support_conversation_claim(conversation_id):
     row = _support_row(conversation_id)
     if not row:
         return {"status": 404, "msg": "会话不存在"}
-    if row.status == "resolved":
-        return {"status": 400, "msg": "会话已结束"}
-    if row.assignee_id not in (None, g.staff_id):
-        return {"status": 409, "msg": "该会话已由其他客服接待"}
-    support.claim(row, g.staff_id)
+    try:
+        support.claim(row, g.staff_id)
+    except ValueError as exc:
+        return {"status": 400, "msg": str(exc)}
+    except PermissionError as exc:
+        return {"status": 409, "msg": str(exc)}
     write_audit("support.claim", "support_conversation", row.id, row.session_id)
     return {"status": 200, "msg": "已接入会话", "data": row.to_dict()}
 
@@ -865,9 +986,14 @@ def support_conversation_reply(conversation_id):
     row = _support_row(conversation_id)
     if not row:
         return {"status": 404, "msg": "会话不存在"}
-    content = str((request.get_json(silent=True) or {}).get("content") or "").strip()
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("content"), str):
+        return {"status": 400, "msg": "回复内容必须是文字"}, 400
+    content = body["content"].strip()
     if not content:
         return {"status": 400, "msg": "回复内容不能为空"}
+    if len(content) > 8000:
+        return {"status": 400, "msg": "回复内容不能超过 8000 字"}, 400
     try:
         support.reply(row, g.staff_id, content)
     except (ValueError, PermissionError) as exc:
@@ -888,7 +1014,7 @@ def support_conversation_resolve(conversation_id):
         return {"status": 404, "msg": "会话不存在"}
     try:
         support.resolve(row, g.staff_id)
-    except PermissionError as exc:
+    except (ValueError, PermissionError) as exc:
         return {"status": 409, "msg": str(exc)}
     write_audit("support.resolve", "support_conversation", row.id, row.session_id)
     return {"status": 200, "msg": "会话已结束", "data": row.to_dict()}

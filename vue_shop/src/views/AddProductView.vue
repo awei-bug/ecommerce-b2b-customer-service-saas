@@ -8,7 +8,7 @@
         <el-alert type="success" show-icon :closable="false" style="margin-bottom:12px">
           <template #title>
             也可以让运营助手一句话上架：上架纯棉T恤，89元，库存30
-            <el-button type="primary" link @click="$router.push('/agent_ops')">去运营助手</el-button>
+            <el-button type="primary" link @click="$router.push({ path: '/operations_center', query: { tab: 'assistant' } })">去运营助手</el-button>
             ；图片和文案已经打成 zip 成品包，去商品列表一次上传自动上架。
             <el-button type="primary" link @click="$router.push('/product_list')">去上传成品包</el-button>
           </template>

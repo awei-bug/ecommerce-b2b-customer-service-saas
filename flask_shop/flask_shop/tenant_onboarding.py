@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import re
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
@@ -101,6 +101,8 @@ def create_formal_tenant(
     admin_name: str,
     admin_password: str,
     admin_nickname: str = "店长",
+    admin_phone: str = "",
+    admin_email: str = "",
     contact_phone: str = "",
     plan_code: str = "pro",
     theme: str = "retail",
@@ -118,13 +120,8 @@ def create_formal_tenant(
         raise OnboardingError("管理员账号只能使用 3-32 位字母、数字、点、下划线或连字符")
     if theme not in VALID_THEMES:
         raise OnboardingError(f"店铺主题必须是：{', '.join(sorted(VALID_THEMES))}")
-    try:
-        fee = Decimal(str(freight_fee or 0))
-        free_amount = None if free_shipping_amount in (None, "") else Decimal(str(free_shipping_amount))
-    except InvalidOperation as exc:
-        raise OnboardingError("运费金额格式不正确") from exc
-    if fee < 0 or (free_amount is not None and free_amount < 0):
-        raise OnboardingError("运费金额不能小于 0")
+    fee = _money(freight_fee if freight_fee not in (None, "") else 0, "运费")
+    free_amount = None if free_shipping_amount in (None, "") else _money(free_shipping_amount, "免运金额")
 
     with tenant_context(disabled=True):
         if models.Tenant.query.filter_by(slug=slug).first():
@@ -159,6 +156,8 @@ def create_formal_tenant(
             tenant_id=tenant.id,
             name=admin_name,
             nick_name=(admin_nickname or "店长").strip()[:32],
+            phone=(admin_phone or "").strip()[:32] or None,
+            email=(admin_email or "").strip()[:64] or None,
             role_id=role.id,
             is_admin=1,
         )
@@ -292,19 +291,49 @@ def _money(value: Any, label: str, *, allow_zero: bool = True) -> Decimal:
         amount = Decimal(str(value).replace(",", "").replace("¥", "").replace("￥", "").strip())
     except (InvalidOperation, AttributeError) as exc:
         raise OnboardingError(f"{label}格式不正确") from exc
-    if amount < 0 or (not allow_zero and amount == 0):
+    if not amount.is_finite():
+        raise OnboardingError(f"{label}必须是有限数值")
+    if amount < 0:
         raise OnboardingError(f"{label}必须大于{'等于' if allow_zero else ''} 0")
-    return amount.quantize(Decimal("0.01"))
+    if amount > Decimal("9999999999.99"):
+        raise OnboardingError(f"{label}超出允许范围")
+    amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if not allow_zero and amount == 0:
+        raise OnboardingError(f"{label}四舍五入后必须大于 0")
+    return amount
 
 
 def _integer(value: Any, label: str, *, minimum: int = 0) -> int:
     try:
-        number = int(float(value))
-    except (TypeError, ValueError) as exc:
+        number = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError) as exc:
         raise OnboardingError(f"{label}必须是整数") from exc
+    if not number.is_finite() or number != number.to_integral_value():
+        raise OnboardingError(f"{label}必须是整数")
     if number < minimum:
         raise OnboardingError(f"{label}不能小于 {minimum}")
-    return number
+    if number > 2147483647:
+        raise OnboardingError(f"{label}超出允许范围")
+    return int(number)
+
+
+def _sensitive_import_field(key: Any) -> bool:
+    return any(term in str(key).lower() for term in ('password', 'passwd', '密码', 'secret', 'token'))
+
+
+def _redact_import_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: ('[已隐藏]' if _sensitive_import_field(key) else value)
+        for key, value in row.items()
+    }
+
+
+def _redact_import_reason(exc: Exception, row: dict[str, Any]) -> str:
+    reason = str(exc)
+    for key, value in row.items():
+        if _sensitive_import_field(key) and value not in (None, ''):
+            reason = reason.replace(str(value), '[已隐藏]')
+    return reason
 
 
 def _boolean(value: Any, default: bool = False) -> bool:
@@ -412,9 +441,11 @@ def _import_order(tenant_id: int, row: dict[str, Any]) -> models.Order:
     product = models.Product.query.filter_by(tenant_id=tenant_id, name=product_name).first()
     if not product:
         raise OnboardingError("商品不存在，请先导入商品")
-    quantity = _integer(_value(row, "quantity", "数量") or 1, "数量", minimum=1)
+    quantity_raw = _value(row, "quantity", "数量")
+    quantity = _integer(1 if quantity_raw in (None, "") else quantity_raw, "数量", minimum=1)
     unit_raw = _value(row, "unit_price", "单价")
     unit_price = _money(product.price if unit_raw in (None, "") else unit_raw, "单价", allow_zero=False)
+    total = _money(unit_price * quantity, "订单总额", allow_zero=False)
     status = str(_value(row, "status", "状态") or "completed").strip().lower()
     if status not in VALID_ORDER_STATUS:
         raise OnboardingError(f"订单状态必须是：{', '.join(sorted(VALID_ORDER_STATUS))}")
@@ -432,7 +463,6 @@ def _import_order(tenant_id: int, row: dict[str, Any]) -> models.Order:
         )
         db.session.add(customer)
         db.session.flush()
-    total = unit_price * quantity
     order = models.Order(
         tenant_id=tenant_id,
         order_no=order_no,
@@ -501,14 +531,11 @@ def import_initial_data(tenant_slug: str, rows_by_kind: dict[str, list[dict[str,
             importer = IMPORTERS[kind]
             for row_number, row in enumerate(rows_by_kind[kind], start=2):
                 try:
-                    if dry_run:
+                    with db.session.begin_nested():
                         entity = importer(tenant.id, row)
-                    else:
-                        with db.session.begin_nested():
-                            entity = importer(tenant.id, row)
                     created[kind].append({"row": row_number, "id": entity.id, "name": getattr(entity, "name", None) or getattr(entity, "order_no", None)})
                 except Exception as exc:
-                    errors.append({"kind": kind, "row": row_number, "reason": str(exc), "source": dict(row)})
+                    errors.append({"kind": kind, "row": row_number, "reason": _redact_import_reason(exc, row), "source": _redact_import_row(row)})
         if dry_run:
             db.session.rollback()
         else:

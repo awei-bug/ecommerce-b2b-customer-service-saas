@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import os
+import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 import pymysql
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "deploy" / "backups"
-OUT.mkdir(parents=True, exist_ok=True)
 
 # 读 flask_shop/.env
 env = ROOT / "flask_shop" / ".env"
@@ -29,20 +31,18 @@ PWD = os.getenv("MYSQL_PASSWORD", "123456")
 DB = os.getenv("MYSQL_DB", "flask_shop")
 
 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-out_file = OUT / f"{DB}_{ts}.sql"
 
 
 def esc(s: str) -> str:
-    return s.replace("\\", "\\\\").replace("'", "\\'")
+    return pymysql.converters.escape_string(s)
 
 
-def main():
-    conn = pymysql.connect(
-        host=HOST, port=PORT, user=USER, password=PWD, database=DB, charset="utf8mb4"
-    )
+def build_dump(conn):
     cur = conn.cursor()
     cur.execute("SHOW TABLES")
     tables = [r[0] for r in cur.fetchall()]
+    if not tables:
+        raise ValueError("Database has no tables; backup was not published")
     lines = [
         f"-- backup {DB} @ {HOST}:{PORT} {ts}",
         "SET NAMES utf8mb4;",
@@ -72,9 +72,32 @@ def main():
                     vals.append("'" + esc(str(v)) + "'")
             lines.append(f"INSERT INTO `{table}` ({col_list}) VALUES ({','.join(vals)});")
     lines.append("SET FOREIGN_KEY_CHECKS=1;")
-    out_file.write_text("\n".join(lines), encoding="utf-8")
-    conn.close()
-    print(f"OK {out_file} tables={len(tables)}")
+    return lines, len(tables)
+
+
+def main():
+    if not re.fullmatch(r"[A-Za-z0-9_]+", DB):
+        raise ValueError("Invalid MYSQL_DB")
+    OUT.mkdir(parents=True, exist_ok=True)
+    out_file = OUT / f"{DB}_{ts}_{uuid4().hex}.sql"
+    conn = pymysql.connect(
+        host=HOST, port=PORT, user=USER, password=PWD, database=DB, charset="utf8mb4"
+    )
+    try:
+        lines, table_count = build_dump(conn)
+    finally:
+        conn.close()
+    descriptor, temp_name = tempfile.mkstemp(prefix=".backup-", suffix=".partial", dir=OUT)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as backup:
+            backup.write("\n".join(lines))
+            backup.flush()
+            os.fsync(backup.fileno())
+        os.replace(temp_name, out_file)
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
+    print(f"OK {out_file} tables={table_count}")
     return 0
 
 

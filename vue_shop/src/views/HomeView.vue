@@ -5,8 +5,8 @@
       <div class="aside-brand">
         <div class="logo">购</div>
         <div v-show="!collapsed || isMobile" class="brand-text">
-          <div class="title">云购商城</div>
-          <div class="sub">管理后台</div>
+          <div class="title">云购电商</div>
+          <div class="sub">商家工作台</div>
         </div>
       </div>
       <el-menu
@@ -30,22 +30,34 @@
             <el-icon><Goods /></el-icon><span>商品</span>
           </template>
           <el-menu-item index="/product_list">商品列表</el-menu-item>
-          <el-menu-item index="/automation_center">AI 自动上架</el-menu-item>
           <el-menu-item index="/group_list">商品分类</el-menu-item>
           <el-menu-item index="/freight">运费模板</el-menu-item>
         </el-sub-menu>
-        <el-menu-item index="/customer_service">
-          <el-icon><Message /></el-icon><span>客服</span>
+        <el-menu-item index="/automation_center">
+          <el-icon><Picture /></el-icon><span>内容中心</span>
         </el-menu-item>
-        <el-menu-item index="/knowledge_base">
-          <el-icon><Collection /></el-icon><span>知识库</span>
+        <el-menu-item index="/operations_center">
+          <el-icon><Operation /></el-icon><span>自动化运营中心</span>
         </el-menu-item>
-        <el-menu-item index="/user_list">
-          <el-icon><User /></el-icon><span>员工与权限</span>
+        <el-menu-item index="/module_content">
+          <el-icon><MagicStick /></el-icon><span>AI 内容平台</span>
         </el-menu-item>
-        <el-menu-item index="/shop_settings">
-          <el-icon><Setting /></el-icon><span>店铺设置</span>
+        <el-menu-item index="/module_products">
+          <el-icon><Goods /></el-icon><span>商品协作</span>
         </el-menu-item>
+        <el-menu-item index="/module_cross">
+          <el-icon><Promotion /></el-icon><span>跨境运营</span>
+        </el-menu-item>
+        <el-sub-menu index="service">
+          <template #title><el-icon><Message /></el-icon><span>客服</span></template>
+          <el-menu-item index="/customer_service">客服工作台</el-menu-item>
+          <el-menu-item index="/knowledge_base">客服知识库</el-menu-item>
+        </el-sub-menu>
+        <el-sub-menu index="settings">
+          <template #title><el-icon><Setting /></el-icon><span>设置</span></template>
+          <el-menu-item index="/shop_settings">店铺设置</el-menu-item>
+          <el-menu-item index="/user_list">员工与权限</el-menu-item>
+        </el-sub-menu>
       </el-menu>
       <div v-show="!collapsed || isMobile" class="aside-foot">
         <div class="pill">{{ tenantName }}</div>
@@ -87,7 +99,7 @@
 </template>
 
 <script setup>
-import { Close, Collection, Expand, Fold, Goods, List, Menu, Message, Odometer, Setting, User } from '@element-plus/icons-vue'
+import { Close, Expand, Fold, Goods, List, MagicStick, Menu, Message, Odometer, Operation, Picture, Promotion, Setting } from '@element-plus/icons-vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { clearAuthStorage } from '@/utils/permission.js'
@@ -121,7 +133,8 @@ const userName = computed(() => user.nick_name || user.name || '管理员')
 const tenantName = computed(() => tenant.name || tenant.slug || 'demo')
 const activeMenu = computed(() => route.path)
 const TITLE_MAP = {
-  '/automation_center': 'AI 自动上架',
+  '/automation_center': '内容中心',
+  '/operations_center': '自动化运营中心',
   '/data_list': '经营首页',
   '/product_list': '商品列表',
   '/add_product': '添加商品',
@@ -137,6 +150,9 @@ const TITLE_MAP = {
   '/role_list': '菜单列表',
   '/shop_settings': '店铺设置',
   '/agent_ops': '运营助手',
+  '/module_content': 'AI 内容平台',
+  '/module_products': '商品协作',
+  '/module_cross': '跨境运营',
 }
 const pageTitle = computed(() => TITLE_MAP[route.path] || '管理后台')
 watch(() => route.path, () => { mobileOpen.value = false })

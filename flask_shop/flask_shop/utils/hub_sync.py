@@ -2,7 +2,9 @@
 """从数据中心同步商品到电商库，并回执上架结果。
 
 设计原则
-- 数据中心是权威，本函数只做「消费」，不回写内容
+- 数据中心提供商品知识；已有商品库存由本地交易系统维护
+- 新建商品可用数据中心库存初始化，后续同步不覆盖库存
+- 商品只按租户与 external_id 的既有关联识别，同名冲突不自动关联
 - 缺价格的记录不建商品，保留为待补价，避免发明价格
 - 同步幂等：同一 external_id 重复同步只更新不新建
 """
@@ -20,7 +22,7 @@ from flask_shop.utils.money import money_float
 from flask_shop.utils.quota import check_product_quota
 from flask_shop.utils.tenant_query import tenant_context
 
-DEFAULT_STOCK = 10
+DEFAULT_STOCK = 0
 
 
 def _knowledge_payload(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -40,6 +42,7 @@ def _knowledge_payload(item: Dict[str, Any]) -> Dict[str, Any]:
         "spec": item.get("spec") or {},
         "faq": item.get("faq") or [],
         "desc_zh": item.get("desc_zh"),
+        "desc_en": item.get("desc_en"),
         "images": item.get("images") or [],
         "video_url": item.get("video_url"),
         "source_job_id": item.get("source_job_id"),
@@ -58,24 +61,25 @@ def _first_image(item: Dict[str, Any]) -> str:
 
 def _find_knowledge(tenant_id: int, external_id: str):
     with tenant_context(tenant_id=tenant_id):
-        return models.ProductKnowledge.query.filter_by(external_id=external_id).first()
+        return (models.ProductKnowledge.query.filter_by(tenant_id=tenant_id, external_id=external_id)
+                .populate_existing().with_for_update().first())
 
 
 def _get_product(tenant_id: int, product_id: Optional[int]):
     if not product_id:
         return None
     with tenant_context(tenant_id=tenant_id):
-        return db.session.get(models.Product, int(product_id))
+        return models.Product.query.filter_by(id=int(product_id), tenant_id=tenant_id).first()
 
 
-def _apply_item(tenant_id: int, item: Dict[str, Any], publish: bool) -> Dict[str, Any]:
+def _apply_item(tenant_id: int, item: Dict[str, Any], publish: bool, *, safe_existing: bool = False) -> Dict[str, Any]:
     external_id = str(item.get("external_id") or "").strip()
     if not external_id:
-        return {"external_id": None, "action": "error", "message": "缺少 external_id"}
+        return {"external_id": None, "action": "error", "code": "missing_id", "message": "缺少 external_id"}
 
     name = str(item.get("title") or "").strip()
     if not name:
-        return {"external_id": external_id, "action": "error", "message": "缺少商品名称"}
+        return {"external_id": external_id, "action": "error", "code": "missing_title", "message": "缺少商品名称"}
 
     price = item.get("price")
     try:
@@ -85,6 +89,16 @@ def _apply_item(tenant_id: int, item: Dict[str, Any], publish: bool) -> Dict[str
 
     knowledge = _find_knowledge(tenant_id, external_id)
     product = _get_product(tenant_id, knowledge.product_id if knowledge else None)
+
+    if knowledge and knowledge.product_id and product is None:
+        return {
+            "external_id": external_id, "action": "error", "code": "invalid_link", "name": name,
+            "message": "商品关联无效或不属于当前租户，请检查后重试",
+        }
+
+    if safe_existing and product is not None:
+        _upsert_knowledge(tenant_id, item, knowledge, product.id, "published" if product.state == 2 else "draft")
+        return {"external_id": external_id, "action": "updated", "product_id": product.id, "name": product.name}
 
     if price_val <= 0:
         # 不发明价格：只登记知识，等人工补价后再同步
@@ -99,30 +113,27 @@ def _apply_item(tenant_id: int, item: Dict[str, Any], publish: bool) -> Dict[str
     linked_before = bool(knowledge and knowledge.product_id)
     if product is None:
         with tenant_context(tenant_id=tenant_id):
-            exists = models.Product.query.filter_by(name=name).first()
+            exists = models.Product.query.filter_by(tenant_id=tenant_id, name=name[:128]).first()
         if exists:
-            product = exists
-        else:
-            ok, msg = check_product_quota(tenant_id)
-            if not ok:
-                return {"external_id": external_id, "action": "error", "name": name, "message": msg}
-            product = models.Product(
-                tenant_id=tenant_id,
-                name=name[:128],
-                price=price_val,
-                number=int(item.get("stock") or DEFAULT_STOCK),
-                state=2 if publish else 0,
-            )
-            db.session.add(product)
-            db.session.flush()
+            return {
+                "external_id": external_id, "action": "error", "code": "name_conflict", "name": name,
+                "message": "存在同名商品，无法自动确认商品身份，请人工核对",
+            }
+        ok, msg = check_product_quota(tenant_id)
+        if not ok:
+            return {"external_id": external_id, "action": "error", "code": "quota", "name": name, "message": msg}
+        product = models.Product(
+            tenant_id=tenant_id,
+            name=name[:128],
+            price=price_val,
+            number=int(item.get("stock") or DEFAULT_STOCK),
+            state=2 if publish else 0,
+        )
+        db.session.add(product)
+        db.session.flush()
 
     product.name = name[:128]
     product.price = price_val
-    if item.get("stock") is not None:
-        try:
-            product.number = int(item.get("stock"))
-        except (TypeError, ValueError):
-            pass
     if publish:
         product.state = 2
 
@@ -191,15 +202,22 @@ def sync_from_hub(
     limit: int = 50,
     publish: bool = True,
     ack: bool = True,
+    offset: int = 0,
+    safe_existing: bool = False,
 ) -> Dict[str, Any]:
     """拉取数据中心记录并落库。
 
     :param tenant: Tenant 实例
-    :param status: 限定状态；留空取全部非 archived
+    :param status: 限定状态；留空时由数据中心返回所有状态，安全自动模式跳过 archived
     :param since: ISO 时间串，增量同步起点
     :param publish: True 上架，False 存草稿
     """
-    items = hub_client.fetch_products(status=status, since=since, limit=limit)
+    fetch_args = {"status": status, "since": since, "limit": limit}
+    if offset:
+        fetch_args["offset"] = offset
+    items = hub_client.fetch_products(**fetch_args)
+    if safe_existing and any(not isinstance(item, dict) or item.get("tenant_slug") != tenant.slug for item in items):
+        raise hub_client.HubError("数据中心返回的商品租户不匹配")
     result: Dict[str, Any] = {
         "tenant_id": getattr(tenant, "id", None),
         "tenant_slug": getattr(tenant, "slug", None),
@@ -212,9 +230,11 @@ def sync_from_hub(
     }
 
     for item in items:
+        if safe_existing and item.get("status") == "archived":
+            continue
         try:
             with tenant_context(tenant_id=getattr(tenant, "id", None)):
-                row = _apply_item(tenant.id, item, publish)
+                row = _apply_item(tenant.id, item, publish, safe_existing=safe_existing)
             db.session.commit()
         except Exception as exc:  # 单条失败不影响整批
             db.session.rollback()
@@ -222,6 +242,7 @@ def sync_from_hub(
             row = {
                 "external_id": item.get("external_id"),
                 "action": "error",
+                "code": "processing_error",
                 "message": str(exc),
             }
 

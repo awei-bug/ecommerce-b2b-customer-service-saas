@@ -118,6 +118,7 @@
               resize="none"
               :rows="3"
               maxlength="1000"
+              :disabled="!!acting"
               show-word-limit
               placeholder="输入回复内容"
               @keydown.ctrl.enter.prevent="sendReply"
@@ -132,7 +133,7 @@
         </footer>
       </template>
 
-      <el-empty v-else :image-size="96" description="选择一条会话开始处理" />
+      <el-empty v-else :image-size="96" :description="loadingDetail ? '正在加载会话…' : '选择一条会话开始处理'" />
     </main>
 
     <aside v-if="detail.conversation" class="profile-pane">
@@ -154,7 +155,7 @@
           <dt>顾客评价</dt><dd>{{ satisfactionText }}</dd>
         </dl>
         <label class="field-label" for="support-priority">优先级</label>
-        <el-select id="support-priority" v-model="priority" :disabled="acting === 'priority'" @change="updatePriority">
+        <el-select id="support-priority" v-model="priority" :disabled="!!acting" @change="updatePriority">
           <el-option label="普通" value="normal" />
           <el-option label="高" value="high" />
           <el-option label="紧急" value="urgent" />
@@ -163,11 +164,12 @@
 
       <section class="profile-section orders-section">
         <h2>最近订单</h2>
-        <div v-if="detail.orders.length" class="order-list">
-          <div v-for="order in detail.orders" :key="order.id" class="order-row">
+        <p v-if="!detail.ordersAllowed" class="order-access">当前账号无订单查看权限</p>
+        <div v-else-if="detail.orders.length" class="order-list">
+          <button v-for="order in detail.orders" :key="order.id" type="button" class="order-row" @click="openOrder(order)">
             <span><strong>{{ order.order_no }}</strong><small>{{ orderStatus(order.status) }}</small></span>
             <b>¥{{ Number(order.price || 0).toFixed(2) }}</b>
-          </div>
+          </button>
         </div>
         <el-empty v-else :image-size="56" description="暂无关联订单" />
       </section>
@@ -179,11 +181,13 @@
 import { ArrowLeft, CircleCheck, Promotion, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '@/api'
 
+const router = useRouter()
 const conversations = ref([])
 const counts = reactive({ bot: 0, waiting: 0, active: 0, resolved: 0 })
-const detail = reactive({ conversation: null, messages: [], orders: [] })
+const detail = reactive({ conversation: null, messages: [], orders: [], ordersAllowed: false })
 const statusFilter = ref('waiting')
 const query = ref('')
 const selectedId = ref(null)
@@ -197,6 +201,11 @@ const timelineRef = ref(null)
 const isMobile = ref(false)
 const mobilePane = ref('list')
 let pollTimer = null
+let detailRequest = 0
+let pendingDetailId = null
+let inboxRequest = 0
+let pendingInboxKey = null
+const replyDrafts = new Map()
 
 const currentUser = (() => {
   try { return JSON.parse(sessionStorage.getItem('user') || '{}') || {} } catch (_) { return {} }
@@ -224,10 +233,15 @@ function responseBody(response) {
 }
 
 async function loadInbox(quiet = true) {
-  if (loadingInbox.value) return
+  const params = { status: statusFilter.value, q: query.value.trim() }
+  const key = JSON.stringify(params)
+  if (loadingInbox.value && pendingInboxKey === key) return
+  const requestId = ++inboxRequest
+  pendingInboxKey = key
   loadingInbox.value = true
   try {
-    const body = responseBody(await api.support_inbox({ status: statusFilter.value, q: query.value.trim() }))
+    const body = responseBody(await api.support_inbox(params))
+    if (requestId !== inboxRequest) return
     if (body.status !== 200) throw new Error(body.msg || '会话列表加载失败')
     conversations.value = body.data?.items || []
     Object.assign(counts, body.data?.counts || {})
@@ -236,33 +250,51 @@ async function loadInbox(quiet = true) {
       await selectConversation(conversations.value[0].id, false)
     }
   } catch (error) {
-    if (!quiet) ElMessage.error(error.message || '会话列表加载失败')
+    if (requestId === inboxRequest && !quiet) ElMessage.error(error.message || '会话列表加载失败')
   } finally {
-    loadingInbox.value = false
+    if (requestId === inboxRequest) {
+      pendingInboxKey = null
+      loadingInbox.value = false
+    }
   }
 }
 
 async function loadDetail(id = selectedId.value, quiet = true) {
-  if (!id || loadingDetail.value) return
+  if (!id || (loadingDetail.value && pendingDetailId === id)) return
+  const requestId = ++detailRequest
+  pendingDetailId = id
   loadingDetail.value = true
   const previousMessageId = detail.messages[detail.messages.length - 1]?.id
   try {
     const body = responseBody(await api.support_conversation(id))
+    if (requestId !== detailRequest || id !== selectedId.value) return
     if (body.status !== 200) throw new Error(body.msg || '会话加载失败')
     detail.conversation = body.data?.conversation || null
     detail.messages = body.data?.messages || []
     detail.orders = body.data?.orders || []
+    detail.ordersAllowed = body.data?.orders_allowed === true
     priority.value = detail.conversation?.priority || 'normal'
     const nextMessageId = detail.messages[detail.messages.length - 1]?.id
     if (nextMessageId !== previousMessageId) await scrollToBottom()
   } catch (error) {
-    if (!quiet) ElMessage.error(error.message || '会话加载失败')
+    if (requestId === detailRequest && !quiet) ElMessage.error(error.message || '会话加载失败')
   } finally {
-    loadingDetail.value = false
+    if (requestId === detailRequest) {
+      pendingDetailId = null
+      loadingDetail.value = false
+    }
   }
 }
 
 async function selectConversation(id, switchPane = true) {
+  if (selectedId.value !== id) {
+    if (selectedId.value) replyDrafts.set(selectedId.value, replyText.value)
+    replyText.value = replyDrafts.get(id) || ''
+    detail.conversation = null
+    detail.messages = []
+    detail.orders = []
+    detail.ordersAllowed = false
+  }
   selectedId.value = id
   if (isMobile.value && switchPane) mobilePane.value = 'detail'
   await loadDetail(id, false)
@@ -274,10 +306,16 @@ async function refreshAll(quiet = true) {
 }
 
 async function changeFilter() {
+  if (selectedId.value) replyDrafts.set(selectedId.value, replyText.value)
+  replyText.value = ''
+  detailRequest++
+  pendingDetailId = null
+  loadingDetail.value = false
   selectedId.value = null
   detail.conversation = null
   detail.messages = []
   detail.orders = []
+  detail.ordersAllowed = false
   await loadInbox(false)
 }
 
@@ -299,17 +337,26 @@ async function perform(action, call, successText) {
 }
 
 function claimConversation() {
-  return perform('claim', () => api.support_claim(selectedId.value), '已接入会话')
+  const id = detail.conversation?.id
+  if (!id || id !== selectedId.value || acting.value) return
+  return perform('claim', () => api.support_claim(id), '已接入会话')
 }
 
 async function sendReply() {
   const content = replyText.value.trim()
-  if (!content || acting.value) return
-  const sent = await perform('reply', () => api.support_reply(selectedId.value, content), '回复已发送')
-  if (sent) replyText.value = ''
+  const original = replyText.value
+  const id = detail.conversation?.id
+  if (!content || !id || id !== selectedId.value || acting.value) return
+  const sent = await perform('reply', () => api.support_reply(id, content), '回复已发送')
+  if (sent) {
+    if (selectedId.value === id && replyText.value === original) replyText.value = ''
+    if (replyDrafts.get(id) === original) replyDrafts.delete(id)
+  }
 }
 
 async function resolveConversation() {
+  const id = detail.conversation?.id
+  if (!id || id !== selectedId.value || acting.value) return
   try {
     await ElMessageBox.confirm('结束后顾客可以评价本次服务。', '结束本次服务', {
       confirmButtonText: '确认结束',
@@ -319,11 +366,18 @@ async function resolveConversation() {
   } catch (_) {
     return
   }
-  await perform('resolve', () => api.support_resolve(selectedId.value), '服务已结束')
+  if (selectedId.value !== id || detail.conversation?.id !== id || acting.value) return
+  await perform('resolve', () => api.support_resolve(id), '服务已结束')
 }
 
 async function updatePriority(value) {
-  await perform('priority', () => api.support_priority(selectedId.value, value), '优先级已更新')
+  const id = detail.conversation?.id
+  if (!id || id !== selectedId.value || acting.value) return
+  await perform('priority', () => api.support_priority(id, value), '优先级已更新')
+}
+
+function openOrder(order) {
+  router.push({ path: '/order_list', query: { order_no: order.order_no, status: '' } })
 }
 
 function syncViewport() {
@@ -346,7 +400,7 @@ function statusLabel(value) { return ({ bot: 'AI 接待中', waiting: '等待人
 function priorityLabel(value) { return ({ normal: '普通', high: '高', urgent: '紧急' })[value] || value }
 function priorityType(value) { return value === 'urgent' ? 'danger' : 'warning' }
 function senderLabel(value) { return ({ customer: '顾客', ai: 'AI 客服', staff: '人工客服', system: '系统' })[value] || value }
-function orderStatus(value) { return ({ pending_pay: '待付款', paid: '已付款', shipped: '已发货', completed: '已完成', cancelled: '已取消', refund_pending: '退款中', refunded: '已退款' })[value] || value }
+function orderStatus(value) { return ({ pending_pay: '待付款', paid: '待发货', shipped: '已发货', completed: '已完成', closed: '已关闭', refunding: '售后中', refunded: '已退款' })[value] || value }
 function compactTime(value) {
   if (!value) return ''
   const date = new Date(value)
@@ -439,6 +493,9 @@ onBeforeUnmount(() => {
 .order-list { display: flex; flex-direction: column; gap: 10px; }
 .order-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; font-size: 12px; }
 .order-row span { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.order-row { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.order-row:hover { background: #f4f1eb; }
+.order-access { color: #6c665d; font-size: 12px; }
 .order-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .order-row small { color: #8b857c; }
 .order-row b { flex: 0 0 auto; color: #b45309; }

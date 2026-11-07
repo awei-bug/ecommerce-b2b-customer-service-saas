@@ -57,6 +57,12 @@ const api = {
     const params = name ? { name } : {}
     return axios.get(u(base.products), { params })
   },
+  get_hub_sync_overview() {
+    return axios.get(u('/products/hub/overview/'))
+  },
+  set_hub_pending_price(knowledgeId, price) {
+    return axios.post(u(`/products/hub/pending/${encodeURIComponent(knowledgeId)}/price/`), { price })
+  },
   add_product(data) {
     return axios.post(u(base.products), data)
   },
@@ -122,6 +128,9 @@ const api = {
   },
   get_order(id) {
     return axios.get(u(base.order + id + '/'))
+  },
+  get_order_pay_proof(id) {
+    return axios.get(u(base.order + id + '/pay-proof/'), { responseType: 'blob' })
   },
   create_order(data) {
     return axios.post(u(base.orders), data)

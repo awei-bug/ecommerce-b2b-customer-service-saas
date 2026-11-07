@@ -17,6 +17,17 @@ from .grounding import ground_reply
 from . import knowledge as knowledge_lib
 
 
+def human_fallback():
+    return {
+        "status": 200, "msg": "ok", "data": {
+            "reply": "抱歉，自动客服暂时无法准确处理您的问题，已提交人工客服队列，请稍候。",
+            "intent": {"intent": "cs", "label": "人工客服"},
+            "products": [], "actions": [], "need_human": True, "blocked": False,
+            "agents_ran": ["handoff_fallback"], "suggested_replies": [],
+        },
+    }
+
+
 class AgentOrchestrator:
     """
     协作策略：
@@ -62,6 +73,8 @@ class AgentOrchestrator:
 
         r_intent = self.intent.safe_run(ctx)
         results.append(r_intent.to_dict())
+        if channel == "mall_chat" and not r_intent.ok:
+            return human_fallback()
         intent_name = (ctx.intent or {}).get("intent") or "greeting"
 
         if intent_name in ("search", "recommend", "compare"):
@@ -72,6 +85,10 @@ class AgentOrchestrator:
             r_risk = self.risk.safe_run(ctx)
             results.append(r_risk.to_dict())
             if not r_risk.ok:
+                if channel == "mall_chat" and (
+                    not (ctx.risk or {}).get("blocked") or any(not item.get("ok") for item in results[:-1])
+                ):
+                    return human_fallback()
                 return self._pack(ctx, results, user_message=r_risk.message, blocked=True)
             # 只有明确购买/下单时才加载订单与收款上下文。
             if any(word in (user_text or '') for word in ("买", "下单", "付款", "支付")):
@@ -88,6 +105,12 @@ class AgentOrchestrator:
         else:
             results.append(self.risk.safe_run(ctx).to_dict())
 
+        if channel == "mall_chat" and any(
+            not result.get("ok") and not (result.get("agent") == "risk" and (ctx.risk or {}).get("blocked"))
+            for result in results
+        ):
+            return human_fallback()
+
         # Ops and listing already produce complete, structured merchant-facing
         # replies. Sending them through CS adds no value and makes core admin
         # actions depend on an external LLM.
@@ -95,6 +118,8 @@ class AgentOrchestrator:
         if not (channel == "admin_ops" and intent_name in ("ops", "list_product")):
             r_cs = self.cs.safe_run(ctx)
             results.append(r_cs.to_dict())
+            if channel == "mall_chat" and not r_cs.ok:
+                return human_fallback()
 
         user_message = self._compose_user_message(ctx, results, r_cs.message if r_cs else "")
         products_preview = ((ctx.catalog or {}).get("items") or [])[:5]

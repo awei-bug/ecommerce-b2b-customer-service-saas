@@ -276,6 +276,15 @@ class Product(db.Model, BaseModel):
     key_props = db.relationship('ProductAttr', backref='product', lazy='dynamic', cascade='all, delete-orphan')
     skus = db.relationship('ProductSku', backref='product', lazy='dynamic', cascade='all, delete-orphan')
 
+    # 海外申报字段：历史 MySQL 独有列，补入模型以免迁移 PostgreSQL 时丢数据。
+    declare_name_cn = db.Column(db.String(128))
+    declare_name_en = db.Column(db.String(128))
+    declare_value = db.Column(db.Float, default=0)
+    goods_type = db.Column(db.String(32), default='general')
+    hs_code = db.Column(db.String(32))
+    logistics_note = db.Column(db.Text)
+    desc_en = db.Column(db.Text)
+
     def stock_total(self):
         active = [s for s in self.skus.filter_by(status=1).all()]
         if active:
@@ -457,6 +466,12 @@ class Order(db.Model, BaseModel):
     buyer_paid_at = db.Column(db.DateTime)
     buyer_paid_note = db.Column(db.String(64))
     buyer_paid_proof = db.Column(db.String(255))
+    # 海外物流/申报字段：历史 MySQL 独有列，补入模型以免迁移 PostgreSQL 时丢数据。
+    weight_total = db.Column(db.Float, default=0)
+    declare_value_total = db.Column(db.Float, default=0)
+    estimate_tariff = db.Column(db.Float, default=0)
+    dest_country = db.Column(db.String(8), default='JP')
+    logistics_check = db.Column(db.Text)
 
     order_detail = db.relationship('OrderDetail', backref='order', lazy='joined', cascade='all, delete-orphan')
     payments = db.relationship('Payment', backref='order', lazy='dynamic')
@@ -1335,3 +1350,21 @@ class CompetitorMonitor(db.Model, BaseModel):
             'status': self.status,
             'last_checked_at': _d(self.last_checked_at),
         }
+
+
+class RevokedToken(db.Model):
+    """Merchant tokens invalidated before their natural expiry.
+
+    A stateless JWT cannot be withdrawn, so logout records the token's `jti` here
+    and `verify_token` refuses it afterwards. Rows are cheap and can be pruned
+    once `expires_at` has passed.
+    """
+
+    __tablename__ = 't_revoked_tokens'
+
+    id = db.Column(db.Integer, primary_key=True)
+    jti = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    tenant_id = db.Column(db.Integer)
+    staff_id = db.Column(db.Integer)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    revoked_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)

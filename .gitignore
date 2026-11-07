@@ -39,6 +39,7 @@ env/
 # ---- 上传/运行时产物 ----
 flask_shop/flask_shop/static/upload/*
 !flask_shop/flask_shop/static/upload/.gitkeep
+flask_shop/instance/
 
 # ---- 测试产物（Playwright 截图/日志，不入库）----
 test-results/

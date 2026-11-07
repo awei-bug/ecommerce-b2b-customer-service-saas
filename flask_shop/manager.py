@@ -30,11 +30,20 @@ if config_name == 'product':
         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     )
 else:
-    origins = cors_origins or [
+    origins = list(cors_origins) or [
         'http://localhost:8080', 'http://127.0.0.1:8080',
         'http://localhost:8081', 'http://127.0.0.1:8081',
         'http://localhost:5173', 'http://127.0.0.1:5173',
     ]
+    # 本地多端口联调：云购 API 是唯一登录签发点，其它端口要靠 cookie 调
+    # /user/session/。这些源只并入非生产配置；生产必须显式配置 CORS_ORIGINS。
+    for extra in (
+        'http://localhost:8090', 'http://127.0.0.1:8090',
+        'http://localhost:5174', 'http://127.0.0.1:5174',
+        'http://localhost:5175', 'http://127.0.0.1:5175',
+    ):
+        if extra not in origins:
+            origins.append(extra)
     CORS(
         app,
         origins=origins,

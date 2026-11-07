@@ -3,8 +3,6 @@ import base64
 import hashlib
 import os
 import threading
-import urllib.parse
-import urllib.request
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 import json
@@ -15,6 +13,7 @@ from flask_shop import db, models
 from flask_shop.automation import automation_bp
 from flask_shop.utils.audit import write_audit
 from flask_shop.utils.money import money_float
+from flask_shop.utils.rbac import permission_required
 from flask_shop.utils.token import login_required
 from flask_shop.utils.tenant_query import tenant_context
 
@@ -30,6 +29,7 @@ DEFAULT_RULES = (
     ('ads', '广告 ROI 止损巡检', 'hourly', 'alert'),
     ('competitor', '竞品价格排名监控', 'daily 10:00', 'alert'),
 )
+FROZEN_MODULES = frozenset({'finance', 'ads', 'competitor'})
 
 
 def _body():
@@ -37,31 +37,22 @@ def _body():
 
 
 def _persist_generated_image(image):
-    """把 Agnes 的 URL/Base64 结果保存为本店静态资源，避免外链过期。"""
+    """保存 Base64 图片，不从调用方提供的网址发起网络请求。"""
     image = image or {}
     raw = None
-    content_type = ''
     encoded = str(image.get('b64_json') or '').strip()
     if encoded:
         if ',' in encoded and encoded.lower().startswith('data:'):
-            header, encoded = encoded.split(',', 1)
-            content_type = header[5:].split(';', 1)[0].lower()
+            encoded = encoded.split(',', 1)[1]
+        max_bytes = int(current_app.config.get('MAX_UPLOAD_IMAGE_BYTES') or 5 * 1024 * 1024)
+        if len(encoded) > ((max_bytes + 2) // 3) * 4:
+            raise ValueError('生成图片超过上传大小限制')
         try:
             raw = base64.b64decode(encoded, validate=True)
         except (ValueError, TypeError):
             raise ValueError('生成图片 Base64 不合法')
     else:
-        image_url = str(image.get('url') or '').strip()
-        parsed = urllib.parse.urlparse(image_url)
-        if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
-            raise ValueError('生成图片地址不合法')
-        try:
-            req = urllib.request.Request(image_url, headers={'User-Agent': 'shop-image-import/1.0'})
-            with urllib.request.urlopen(req, timeout=35) as response:
-                content_type = str(response.headers.get('Content-Type') or '').split(';', 1)[0].lower()
-                raw = response.read(int(current_app.config.get('MAX_UPLOAD_IMAGE_BYTES') or 5 * 1024 * 1024) + 1)
-        except Exception as exc:
-            raise ValueError(f'无法保存生成图片: {exc}')
+        raise ValueError('暂不支持从图片网址导入，请使用 Base64 图片')
 
     max_bytes = int(current_app.config.get('MAX_UPLOAD_IMAGE_BYTES') or 5 * 1024 * 1024)
     if not raw or len(raw) > max_bytes:
@@ -243,7 +234,7 @@ def _run_creative_auto(app, run_id, tenant_id, product_ids, *, publish=True, cha
                             prompt,
                             size='1K',
                             ratio='1:1',
-                            response_format='url',
+                            response_format='b64_json',
                         )
                         if not image.get('ok'):
                             raise ValueError(image.get('error') or '图片生成失败')
@@ -256,7 +247,6 @@ def _run_creative_auto(app, run_id, tenant_id, product_ids, *, publish=True, cha
                         if publish:
                             product.state = 2
                         item.update({'status': 'success', 'published': bool(product.state == 2), 'path': path, 'model': image.get('model')})
-                        write_audit('automation.creative_auto_item', 'product', product.id, f'publish={publish}')
                     except Exception as exc:
                         db.session.rollback()
                         item['error'] = str(exc)[:255]
@@ -272,6 +262,8 @@ def _run_creative_auto(app, run_id, tenant_id, product_ids, *, publish=True, cha
                         run.output_json = json.dumps(output, ensure_ascii=False, default=str)
                         run.summary = f"已处理 {output['completed']}/{output['total']} 个商品"
                         save_progress()
+                    if item['status'] == 'success':
+                        write_audit('automation.creative_auto_item', 'product', product_id, f'publish={publish}')
 
                 run = models.AutomationRun.query.filter_by(id=run_id, tenant_id=tenant_id).first()
                 output = _creative_auto_output(run)
@@ -315,6 +307,8 @@ def _ensure_rules(tenant_id):
     by_key = {}
     changed = False
     for row in existing:
+        if row.module_code in FROZEN_MODULES:
+            continue
         key = (row.module_code, row.name)
         if key in by_key:
             db.session.delete(row)
@@ -322,6 +316,8 @@ def _ensure_rules(tenant_id):
         else:
             by_key[key] = row
     for module_code, name, schedule, action_type in DEFAULT_RULES:
+        if module_code in FROZEN_MODULES:
+            continue
         if (module_code, name) in by_key:
             continue
         db.session.add(models.AutomationRule(
@@ -543,24 +539,29 @@ def _module_rows(tenant_id, start):
     listing = _listing_audit(tenant_id)
     aftersale = _after_sales(tenant_id, start)
     service = _service_risk(tenant_id, start)
-    competitor_alerts = models.CompetitorMonitor.query.filter(
-        models.CompetitorMonitor.tenant_id == tenant_id,
-        models.CompetitorMonitor.alert_flags.isnot(None),
-        models.CompetitorMonitor.alert_flags != '',
-    ).count()
-    return [
+    competitor_alerts = 0
+    if 'competitor' not in FROZEN_MODULES:
+        competitor_alerts = models.CompetitorMonitor.query.filter(
+            models.CompetitorMonitor.tenant_id == tenant_id,
+            models.CompetitorMonitor.alert_flags.isnot(None),
+            models.CompetitorMonitor.alert_flags != '',
+        ).count()
+    rows = [
         {'code': 'selection', 'name': '选品调研', 'metric': f'{len(_selection(tenant_id, start))} 个候选', 'state': 'ready'},
         {'code': 'listing', 'name': '商品上架', 'metric': f'{sum(1 for x in listing if x["ready"])} 个就绪', 'state': 'ready'},
         {'code': 'creative', 'name': '素材批量生成', 'metric': f'{sum(1 for x in listing if "主图" in x["missing"])} 个缺图', 'state': 'attention'},
         {'code': 'service', 'name': '客服会话质检', 'metric': f'{service["need_human"]} 个需人工', 'state': 'attention' if service['need_human'] else 'ready'},
         {'code': 'aftersale', 'name': '售后分类', 'metric': f'{aftersale["total"]} 个问题单', 'state': 'ready'},
         {'code': 'finance', 'name': '利润核算', 'metric': '三表已生成', 'state': 'ready'},
-        {'code': 'ads', 'name': '广告 ROI', 'metric': f'{len(_campaign_rows(tenant_id, start))} 条日数据', 'state': 'ready'},
+        {'code': 'ads', 'name': '广告 ROI', 'metric': f'{len(_campaign_rows(tenant_id, start)) if "ads" not in FROZEN_MODULES else 0} 条日数据', 'state': 'ready'},
         {'code': 'competitor', 'name': '竞品监控', 'metric': f'{competitor_alerts} 个异常', 'state': 'attention' if competitor_alerts else 'ready'},
     ]
+    return [row for row in rows if row['code'] not in FROZEN_MODULES]
 
 
 def _execute_rule(rule):
+    if rule.module_code in FROZEN_MODULES:
+        raise ValueError('该模块暂未开放')
     start, end, _days = _period(30)
     run = models.AutomationRun(
         tenant_id=rule.tenant_id, rule_id=rule.id, module_code=rule.module_code,
@@ -615,12 +616,13 @@ def _execute_rule(rule):
 
 @automation_bp.get('/overview/')
 @login_required
+@permission_required('report:read')
 def overview():
     start, end, days = _period(request.args.get('days', 30))
     _ensure_rules(g.tenant_id)
-    finance = _finance(g.tenant_id, start, end)
-    rules = models.AutomationRule.query.filter_by(tenant_id=g.tenant_id).all()
-    runs = models.AutomationRun.query.filter_by(tenant_id=g.tenant_id).order_by(models.AutomationRun.id.desc()).limit(8).all()
+    finance = _finance(g.tenant_id, start, end) if 'finance' not in FROZEN_MODULES else None
+    rules = models.AutomationRule.query.filter_by(tenant_id=g.tenant_id).filter(models.AutomationRule.module_code.notin_(FROZEN_MODULES)).all()
+    runs = models.AutomationRun.query.filter_by(tenant_id=g.tenant_id).filter(models.AutomationRun.module_code.notin_(FROZEN_MODULES)).order_by(models.AutomationRun.id.desc()).limit(8).all()
     return {'status': 200, 'msg': 'ok', 'data': {
         'period': {'days': days, 'start': start.date().isoformat(), 'end': end.date().isoformat()},
         'finance': finance,
@@ -641,13 +643,18 @@ def overview():
 @automation_bp.route('/rules/', methods=['GET', 'POST'])
 @login_required
 def rules():
-    _ensure_rules(g.tenant_id)
+    from flask_shop.utils.rbac import staff_has_permission
+    if not staff_has_permission('report:read' if request.method == 'GET' else 'product:write'):
+        return {'status': 403, 'msg': '无权限执行此操作'}
     if request.method == 'GET':
-        rows = models.AutomationRule.query.filter_by(tenant_id=g.tenant_id).order_by(models.AutomationRule.id.asc()).all()
+        _ensure_rules(g.tenant_id)
+        rows = models.AutomationRule.query.filter_by(tenant_id=g.tenant_id).filter(models.AutomationRule.module_code.notin_(FROZEN_MODULES)).order_by(models.AutomationRule.id.asc()).all()
         return {'status': 200, 'msg': 'ok', 'data': [x.to_dict() for x in rows]}
     body = _body()
     name = (body.get('name') or '').strip()
     module_code = (body.get('module_code') or '').strip()
+    if module_code in FROZEN_MODULES:
+        return {'status': 503, 'msg': '该模块暂未开放'}
     if not name or module_code not in {x[0] for x in DEFAULT_RULES}:
         return {'status': 400, 'msg': '规则名称或业务模块无效'}
     row = models.AutomationRule(
@@ -665,10 +672,13 @@ def rules():
 
 @automation_bp.route('/rules/<int:rule_id>/', methods=['PUT'])
 @login_required
+@permission_required('product:write')
 def rule_detail(rule_id):
     row = models.AutomationRule.query.filter_by(id=rule_id, tenant_id=g.tenant_id).first()
     if not row:
         return {'status': 404, 'msg': '规则不存在'}
+    if row.module_code in FROZEN_MODULES:
+        return {'status': 503, 'msg': '该模块暂未开放'}
     body = _body()
     for field in ('name', 'trigger_type', 'schedule', 'action_type', 'status'):
         if field in body:
@@ -682,10 +692,13 @@ def rule_detail(rule_id):
 
 @automation_bp.post('/rules/<int:rule_id>/run/')
 @login_required
+@permission_required('product:write')
 def run_rule(rule_id):
     row = models.AutomationRule.query.filter_by(id=rule_id, tenant_id=g.tenant_id).first()
     if not row:
         return {'status': 404, 'msg': '规则不存在'}
+    if row.module_code in FROZEN_MODULES:
+        return {'status': 503, 'msg': '该模块暂未开放'}
     run = _execute_rule(row)
     return {'status': 200 if run.status == 'success' else 500, 'msg': run.summary, 'data': run.to_dict()}
 
@@ -693,6 +706,8 @@ def run_rule(rule_id):
 @automation_bp.route('/campaigns/', methods=['GET', 'POST'])
 @login_required
 def campaigns():
+    if 'ads' in FROZEN_MODULES:
+        return {'status': 503, 'msg': '广告模块暂未开放'}
     if request.method == 'GET':
         start, _end, _days = _period(request.args.get('days', 30))
         return {'status': 200, 'msg': 'ok', 'data': [x.to_dict() for x in _campaign_rows(g.tenant_id, start)]}
@@ -720,6 +735,8 @@ def campaigns():
 @automation_bp.route('/competitors/', methods=['GET', 'POST'])
 @login_required
 def competitors():
+    if 'competitor' in FROZEN_MODULES:
+        return {'status': 503, 'msg': '竞品模块暂未开放'}
     if request.method == 'GET':
         rows = models.CompetitorMonitor.query.filter_by(tenant_id=g.tenant_id).order_by(models.CompetitorMonitor.id.desc()).all()
         return {'status': 200, 'msg': 'ok', 'data': [x.to_dict() for x in rows]}
@@ -742,6 +759,8 @@ def competitors():
 @automation_bp.post('/competitors/<int:monitor_id>/scan/')
 @login_required
 def scan_competitor(monitor_id):
+    if 'competitor' in FROZEN_MODULES:
+        return {'status': 503, 'msg': '竞品模块暂未开放'}
     row = models.CompetitorMonitor.query.filter_by(id=monitor_id, tenant_id=g.tenant_id).first()
     if not row:
         return {'status': 404, 'msg': '监控目标不存在'}
@@ -772,6 +791,7 @@ def scan_competitor(monitor_id):
 
 @automation_bp.post('/creative/generate/')
 @login_required
+@permission_required('product:write')
 def creative_generate():
     body = _body()
     product_id = body.get('product_id')
@@ -817,16 +837,17 @@ def creative_generate():
             size=str(body.get('image_size') or '1K').upper(),
             ratio=str(body.get('image_ratio') or '1:1'),
             images=body.get('reference_images') or [],
-            response_format='url',
+            response_format='b64_json',
         )
         kit['image'] = {
-            'ok': bool(image_result.get('ok')),
+            'ok': bool(image_result.get('ok') and image_result.get('b64_json')),
             'model': image_result.get('model'),
             'url': image_result.get('url'),
+            'b64_json': image_result.get('b64_json'),
             'error': image_result.get('error'),
         }
-        if not image_result.get('ok'):
-            kit['notice'] = '图片模型暂不可用，已保留素材方案；请检查 AGNES_API_KEY 或稍后重试。'
+        if not kit['image']['ok']:
+            kit['notice'] = '图片模型未返回可保存的 Base64 图片，已保留素材方案；请检查服务配置。'
         else:
             kit['notice'] = '素材方案与 Agnes 主图均已生成；请人工确认图片内容后再发布。'
     write_audit('automation.creative_generate', 'product', product.id, channel)
@@ -835,6 +856,7 @@ def creative_generate():
 
 @automation_bp.post('/creative/apply/')
 @login_required
+@permission_required('product:write')
 def creative_apply():
     """保存已确认的生成主图，并可选把商品发布到商城。"""
     body = _body()
@@ -868,17 +890,18 @@ def creative_apply():
 
 @automation_bp.post('/creative/auto/start/')
 @login_required
+@permission_required('product:write')
 def creative_auto_start():
     """启动一键素材生成与上架任务，浏览器只需等待状态。"""
     body = _body()
+    tenant = models.Tenant.query.filter_by(id=g.tenant_id).first()
+    if not tenant or getattr(tenant, 'data_mode', 'live') != 'demo':
+        return {'status': 503, 'msg': '正式店铺的批量自动上架暂未开放，请人工确认商品素材后发布'}
     scope = str(body.get('scope') or 'create_new')
     if scope not in {'create_new', 'missing_image', 'all_products'}:
         return {'status': 400, 'msg': 'scope 仅支持 create_new / missing_image / all_products'}
     create_count = 0
     if scope == 'create_new':
-        tenant = models.Tenant.query.filter_by(id=g.tenant_id).first()
-        if not tenant or (getattr(tenant, 'data_mode', 'live') != 'demo' and not current_app.testing):
-            return {'status': 400, 'msg': '正式店铺不能凭空创建商品，请先导入商品或接入货源'}
         try:
             create_count = min(max(int(body.get('count') or 3), 1), 5)
         except (TypeError, ValueError):
@@ -934,6 +957,7 @@ def creative_auto_start():
 
 @automation_bp.get('/creative/auto/<int:run_id>/')
 @login_required
+@permission_required(['product:read', 'product:write'])
 def creative_auto_status(run_id):
     run = models.AutomationRun.query.filter_by(
         id=run_id, tenant_id=g.tenant_id, module_code='creative_auto',
@@ -945,6 +969,7 @@ def creative_auto_status(run_id):
 
 @automation_bp.get('/creative/auto/current/')
 @login_required
+@permission_required(['product:read', 'product:write'])
 def creative_auto_current():
     """返回本租户正在运行的任务；没有运行任务时返回最近一次结果。"""
     query = models.AutomationRun.query.filter_by(
@@ -965,6 +990,7 @@ def creative_auto_current():
 
 @automation_bp.post('/creative/auto/<int:run_id>/stop/')
 @login_required
+@permission_required('product:write')
 def creative_auto_stop(run_id):
     run = models.AutomationRun.query.filter_by(
         id=run_id, tenant_id=g.tenant_id, module_code='creative_auto',

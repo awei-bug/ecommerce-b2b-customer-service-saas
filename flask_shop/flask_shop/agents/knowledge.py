@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """客服知识供给层：店铺事实与商品知识统一检索。
 
-店铺政策来自商家维护的 t_store_knowledge；商品事实优先使用本地
-t_product_knowledge 副本，未命中时再回源数据中心。
+店铺政策来自商家维护的 t_store_knowledge；商品知识只使用绑定到本店在售商品的本地副本。
 """
 from __future__ import annotations
 
@@ -106,17 +105,43 @@ def _compact(card: Dict[str, Any], max_points: int = 5, max_faq: int = 3) -> Dic
 
 
 def _local_cards(tenant_id: int) -> List[Dict[str, Any]]:
+    from flask_shop.agents.support import refresh_product_slots
+
     with tenant_context(tenant_id=tenant_id):
-        rows = models.ProductKnowledge.query.filter_by(status="published").all()
+        rows = models.ProductKnowledge.query.filter_by(tenant_id=tenant_id, status="published").all()
+        products = []
+        for offset in range(0, len(rows), 5):
+            products.extend(refresh_product_slots(tenant_id, [
+                {'id': row.product_id} for row in rows[offset:offset + 5]
+            ])[0])
     out = []
-    for row in rows:
-        card = row.knowledge() or {}
-        if not card:
+    for row, product in zip(rows, products):
+        if not product:
             continue
-        card["product_id"] = row.product_id
+        card = row.knowledge() or {}
+        if not isinstance(card, dict) or not card:
+            continue
+        card.update(product_id=product['id'], title=product['name'], price=product['price'], stock=product['stock'])
         card["external_id"] = row.external_id
+        card["tags"] = card.get("tags") if isinstance(card.get("tags"), list) else []
+        card["images"] = card.get("images") if isinstance(card.get("images"), list) else []
+        selling_points = card.get("selling_points") if isinstance(card.get("selling_points"), list) else []
+        faq = card.get("faq") if isinstance(card.get("faq"), list) else []
+        spec = card.get("spec") if isinstance(card.get("spec"), dict) else {}
+        card["selling_points"] = [value for value in selling_points if _stable_product_text(value)]
+        card["faq"] = [item for item in faq if isinstance(item, dict)
+                       and _stable_product_text(item.get('q')) and _stable_product_text(item.get('a'))]
+        card["spec"] = {key: value for key, value in spec.items()
+                        if _stable_product_text(key) and _stable_product_text(value)}
+        for key in ('desc_zh', 'scenario', 'category', 'brand'):
+            if not _stable_product_text(card.get(key)):
+                card[key] = ''
         out.append(card)
     return out
+
+
+def _stable_product_text(value: Any) -> bool:
+    return not re.search(r'库存|价格|售价|优惠|折扣|包邮|现货|缺货|售罄|运费|[¥￥]|\d\s*(?:元|块|折)', str(value or ''))
 
 
 def _store_score(row, tokens: List[str], raw: str) -> float:
@@ -150,7 +175,7 @@ def load_store_knowledge(tenant_id: Optional[int], query: str, limit: int = 3) -
         return []
     tokens = tokenize(query)
     with tenant_context(tenant_id=int(tenant_id)):
-        rows = models.StoreKnowledge.query.filter_by(status="published").all()
+        rows = models.StoreKnowledge.query.filter_by(tenant_id=int(tenant_id), status="published").all()
     scored = [(_store_score(row, tokens, query), row) for row in rows]
     scored = [(score, row) for score, row in scored if score >= 4]
     scored.sort(key=lambda item: (-item[0], -(item[1].priority or 0), item[1].id))
@@ -219,7 +244,7 @@ def load_knowledge(
 ) -> List[Dict[str, Any]]:
     """返回与问题最相关的商品知识卡。
 
-    本地副本无结果时回源数据中心，保证内容平台新产出即刻可被客服引用。
+    仅使用本店已绑定商品的本地副本；未建立跨系统租户隔离前不直接回源。
     """
     query = (query or "").strip()
     if not query:
@@ -232,6 +257,9 @@ def load_knowledge(
     if tenant_id:
         try:
             store_cards = load_store_knowledge(int(tenant_id), query, limit=limit)
+        except Exception:
+            current_app.logger.exception("store knowledge load failed")
+        try:
             local = _local_cards(int(tenant_id))
             scored = []
             for card in local:
@@ -241,21 +269,7 @@ def load_knowledge(
             scored.sort(key=lambda x: -x[0])
             product_cards = [_compact(c) for _, c in scored[:limit]]
         except Exception:
-            current_app.logger.exception("local knowledge load failed")
-            store_cards = []
-            product_cards = []
-
-    if not product_cards:
-        try:
-            from flask_shop.utils import hub_client
-
-            if hub_client.hub_enabled():
-                product_cards = [_compact(card) for card in hub_client.search(
-                    query, limit=limit, published_only=True,
-                )]
-        except Exception:
-            current_app.logger.exception("hub knowledge search failed")
-            product_cards = []
+            current_app.logger.exception("product knowledge load failed")
 
     return _rrf_merge([store_cards, product_cards], limit)
 

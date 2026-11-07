@@ -2,8 +2,8 @@
 """初始化电商演示数据。
 
 用法:
-  set ALLOW_DB_RESET=1
-  .venv\\Scripts\\python scripts\\seeds\\seed_shop.py --reset
+  .venv\\Scripts\\python scripts\\seeds\\seed_shop.py
+  整库重置已禁用；请使用独立的空演示数据库。
 """
 import argparse
 import os
@@ -14,8 +14,12 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from flask_shop import create_app, db, models
+from flask_shop.utils.demo_seed import reject_production_demo_seed
 from flask_shop.utils.menu_defaults import MENU_L1, MENU_L2
 
+reject_production_demo_seed()
+if '--reset' in sys.argv:
+    raise SystemExit('已禁用整库重置；请使用独立的空演示数据库。')
 app = create_app('develop')
 
 DEFAULT_PAY_GUIDE = (
@@ -50,17 +54,14 @@ def ensure_menus():
 def seed_shop(reset=False):
     with app.app_context():
         if reset:
-            if os.getenv('ALLOW_DB_RESET') != '1':
-                print('拒绝 drop_all：请设置 ALLOW_DB_RESET=1')
-                sys.exit(1)
-            print('>> drop_all ...')
-            db.drop_all()
+            raise RuntimeError('已禁用整库重置；请使用独立的空演示数据库。')
 
         print('>> create_all ...')
         db.create_all()
-        menus = ensure_menus()
-
         tenant = models.Tenant.query.filter_by(slug='demo').first()
+        if tenant and tenant.data_mode != 'demo':
+            raise RuntimeError('拒绝修改非演示模式的 demo 店铺')
+        menus = ensure_menus()
         if not tenant:
             tenant = models.Tenant(
                 name='云购演示旗舰店',
@@ -105,8 +106,7 @@ def seed_shop(reset=False):
         else:
             admin.role_id = role.id
             admin.is_admin = 1
-            admin.password = '123456'
-            print('  ~ admin password reset to 123456')
+            print('  ~ existing admin password unchanged')
 
         # 分类
         cats = {}
@@ -178,7 +178,7 @@ def seed_shop(reset=False):
 
         db.session.commit()
         print('>> done')
-        print('商家后台: tenant=demo  admin / 123456')
+        print('商家后台: tenant=demo  新建 admin 初始密码为 123456；已有账号密码保持不变')
         print('顾客端:   tenant=demo  手机任意合法号 + 验证码 123456')
 
 

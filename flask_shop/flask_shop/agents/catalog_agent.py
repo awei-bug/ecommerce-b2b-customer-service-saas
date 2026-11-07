@@ -12,7 +12,7 @@ class CatalogAgent(BaseAgent):
     name = AgentName.CATALOG.value
     description = "商品检索/推荐/对比"
 
-    def _from_knowledge(self, ctx: AgentContext, query: str):
+    def _from_knowledge(self, ctx: AgentContext, query: str, budget=None):
         """商品库没命中时用数据中心知识卡兜底，只取已上架商品。"""
         if not query:
             return []
@@ -29,6 +29,8 @@ class CatalogAgent(BaseAgent):
                 price = float(c.get("price") or 0)
                 stock = int(c.get("stock") or 0)
             except (TypeError, ValueError):
+                continue
+            if budget is not None and price > budget:
                 continue
             out.append({
                 "id": pid,
@@ -58,7 +60,7 @@ class CatalogAgent(BaseAgent):
         fallback_used = False
         if not items and query:
             fallback_used = True
-            items = self._from_knowledge(ctx, query) or shop_tools.search_products(
+            items = self._from_knowledge(ctx, query, budget) or shop_tools.search_products(
                 keyword="",
                 tenant_slug=ctx.tenant_slug,
                 tenant_id=ctx.tenant_id,

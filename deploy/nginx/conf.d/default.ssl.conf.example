@@ -1,5 +1,5 @@
 # HTTPS 示例：把证书放到 deploy/certs/fullchain.pem 与 privkey.pem 后
-# 可重命名启用本文件，并视情况注释 conf.d/default.conf 的 80 反代业务（或 80 仅做跳转）
+# 复制为自己的站点配置，并通过 NGINX_SITE_CONFIG 选择；不要修改默认站点文件。
 
 # HTTP → HTTPS
 server {
@@ -8,8 +8,8 @@ server {
 
     location = /healthz {
         access_log off;
-        add_header Content-Type text/plain;
-        return 200 'ok';
+        proxy_pass http://api:5000/health/;
+        proxy_set_header Host $host;
     }
 
     location / {
@@ -32,7 +32,7 @@ server {
         proxy_pass http://api:5000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
         proxy_read_timeout 120s;
     }
@@ -46,15 +46,26 @@ server {
         proxy_pass http://api:5000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
         proxy_read_timeout 120s;
     }
 
+    location ~* ^/static/upload/[^/]+/pay_proof(?:/|$) {
+        return 404;
+    }
     location /static/upload/ {
         alias /var/www/uploads/;
         expires 7d;
         access_log off;
+        types {
+            image/jpeg jpg jpeg;
+            image/png png;
+            image/gif gif;
+            image/webp webp;
+        }
+        default_type application/octet-stream;
+        add_header X-Content-Type-Options nosniff;
     }
 
     location /admin/ {

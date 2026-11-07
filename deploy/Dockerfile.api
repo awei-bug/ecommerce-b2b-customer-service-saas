@@ -23,7 +23,7 @@ RUN pip install --upgrade pip \
 COPY flask_shop /app
 COPY deploy/gunicorn.conf.py /app/deploy/gunicorn.conf.py
 
-RUN mkdir -p /app/flask_shop/static/upload /app/deploy /data/backups \
+RUN mkdir -p /app/flask_shop/static/upload /app/private/pay_proofs /app/deploy /data/backups \
     && useradd -m -u 10001 appuser \
     && chown -R appuser:appuser /app /data
 

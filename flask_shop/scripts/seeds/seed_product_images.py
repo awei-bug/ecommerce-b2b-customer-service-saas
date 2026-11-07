@@ -93,11 +93,15 @@ def download(url: str, dest: Path) -> bool:
 
 
 def main():
+    from flask_shop.utils.demo_seed import reject_production_demo_seed
+    reject_production_demo_seed()
     app = create_app("develop")
     upload_root = Path(app.root_path) / "static" / "upload"
     with app.app_context():
         with tenant_context(disabled=True):
-            products = models.Product.query.order_by(models.Product.id).all()
+            products = (models.Product.query.join(models.Tenant, models.Product.tenant_id == models.Tenant.id)
+                        .filter(models.Tenant.data_mode == 'demo')
+                        .order_by(models.Product.id).all())
             if not products:
                 print("no products; run seed_shop.py first")
                 return 1

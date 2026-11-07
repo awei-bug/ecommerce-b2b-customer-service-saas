@@ -2,7 +2,8 @@
   <div class="claim" v-if="orderId">
     <div v-if="claimed" class="done">
       已通知店长核对收款<template v-if="note">（备注：{{ note }}）</template>
-      <div v-if="proof" class="proof"><img :src="proofSrc" alt="付款截图" /></div>
+      <div v-if="proofSrc" class="proof"><img :src="proofSrc" alt="付款截图" /></div>
+      <p v-else-if="proof && proofError" class="err">付款截图无法加载，请稍后查看。</p>
     </div>
     <form v-else class="form" @submit.prevent="submit">
       <p class="lead">扫码转账后点这里告诉店长，订单仍要等店长确认到账才会发货。</p>
@@ -19,9 +20,8 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
-import { claimPaid } from '@/api'
-import { mediaUrl } from '@/utils/shop'
+import { onUnmounted, ref, watch } from 'vue'
+import { claimPaid, getPayProof } from '@/api'
 
 const props = defineProps({
   orderId: { type: [String, Number], default: '' },
@@ -42,7 +42,28 @@ watch(
   { immediate: true },
 )
 
-const proofSrc = computed(() => mediaUrl(props.proof))
+const proofSrc = ref('')
+const proofError = ref(false)
+let proofVersion = 0
+function clearProof() {
+  if (proofSrc.value) URL.revokeObjectURL(proofSrc.value)
+  proofSrc.value = ''
+}
+watch(() => [props.orderId, props.proof, props.claimed], async ([id, proof, claimed]) => {
+  const version = ++proofVersion
+  clearProof()
+  proofError.value = false
+  if (!id || !proof || !claimed) return
+  try {
+    const blob = await getPayProof(id)
+    if (version !== proofVersion) return
+    if (!(blob instanceof Blob) || !blob.type.startsWith('image/')) throw new Error('invalid image')
+    proofSrc.value = URL.createObjectURL(blob)
+  } catch (_) {
+    if (version === proofVersion) proofError.value = true
+  }
+}, { immediate: true })
+onUnmounted(() => { proofVersion++; clearProof() })
 
 function onFile(e) {
   file.value = e?.target?.files?.[0] || null

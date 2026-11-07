@@ -1,9 +1,78 @@
 import io
+import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from flask_shop import db, models
 from flask_shop.agents import knowledge
 from flask_shop.utils.tenant_query import tenant_context
+from flask_shop.agents.catalog_agent import CatalogAgent
+from flask_shop.agents.tools import shop_tools
+
+
+def _product_knowledge(tenant_id, product_id, external_id, **values):
+    content = {"title": "旧名称", "price": 1, "stock": 99, "tags": ["防风外套"], **values}
+    return models.ProductKnowledge(
+        tenant_id=tenant_id, product_id=product_id, external_id=external_id,
+        status="published", knowledge_json=json.dumps(content, ensure_ascii=False),
+    )
+
+
+def test_product_knowledge_refreshes_current_facts_and_respects_budget(api, app):
+    seed = api["seed"]
+    product = seed["product_a"]
+    product.name = "防风外套"
+    product.price = 120
+    product.number = 99
+    db.session.add(models.ProductSku(tenant_id=seed["id_a"], product_id=product.id, stock=3, status=1))
+    db.session.add(_product_knowledge(seed["id_a"], product.id, "current",
+        selling_points=["轻便", "售价10元", "库存99件"],
+        spec={"面料": "涤纶", "价格": "10元"},
+        faq=[{"q": "库存多少", "a": "99件"}, {"q": "面料", "a": "涤纶"}]))
+    db.session.commit()
+    cards = knowledge.load_knowledge(seed["id_a"], "防风外套")
+    assert len(cards) == 1
+    card = cards[0]
+    assert (card["title"], card["price"], card["stock"]) == ("防风外套", 120, 3)
+    assert card["selling_points"] == ["轻便"]
+    assert card["spec"] == {"面料": "涤纶"}
+    assert card["faq"] == [{"q": "面料", "a": "涤纶"}]
+    ctx = SimpleNamespace(tenant_id=seed["id_a"])
+    assert CatalogAgent()._from_knowledge(ctx, "防风外套", 100) == []
+    assert CatalogAgent()._from_knowledge(ctx, "防风外套", 120)[0]["id"] == product.id
+
+
+def test_product_knowledge_is_tenant_scoped_even_when_scope_disabled(api, app):
+    seed = api["seed"]
+    tenant_id = seed["id_a"]
+    offline = models.Product(tenant_id=tenant_id, name="防风下架", state=0)
+    extra = [models.Product(tenant_id=tenant_id, name=f"防风外套{index}", state=2) for index in range(6)]
+    db.session.add_all([offline, *extra])
+    db.session.flush()
+    rows = [_product_knowledge(tenant_id, product.id, f"local-{index}") for index, product in enumerate(extra)]
+    rows.extend([
+        _product_knowledge(tenant_id, offline.id, "offline"),
+        _product_knowledge(tenant_id, seed["product_b"].id, "foreign-product"),
+        _product_knowledge(tenant_id, None, "unbound"),
+        _product_knowledge(seed["id_b"], seed["product_b"].id, "foreign-knowledge"),
+        models.StoreKnowledge(tenant_id=seed["id_b"], title="防风政策", content="其他店铺", status="published"),
+    ])
+    db.session.add_all(rows)
+    db.session.commit()
+    with tenant_context(disabled=True):
+        cards = knowledge.load_knowledge(tenant_id, "防风外套", limit=20)
+        assert len(cards) == 6
+        assert {card["product_id"] for card in cards} == {product.id for product in extra}
+        assert knowledge.load_store_knowledge(tenant_id, "防风政策") == []
+    assert shop_tools.get_product(offline.id, tenant_id=tenant_id) is None
+    assert shop_tools.get_product(seed["product_b"].id, tenant_id=tenant_id) is None
+    assert shop_tools.get_product(extra[0].id, tenant_id=tenant_id)["id"] == extra[0].id
+
+
+def test_product_knowledge_does_not_use_unscoped_hub(api, app):
+    with patch("flask_shop.utils.hub_client.search") as search:
+        assert knowledge.load_knowledge(api["seed"]["id_a"], "防风外套") == []
+        search.assert_not_called()
 
 
 def _headers(seed, tenant="a"):

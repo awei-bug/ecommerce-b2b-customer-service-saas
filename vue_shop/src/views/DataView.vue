@@ -25,6 +25,26 @@
       title="当前指标来自标准演示业务数据，用于交付验收，不代表真实经营业绩。"
     />
 
+    <details v-if="dashboard.setup" class="setup-guide" :open="setupIncomplete">
+      <summary>
+        <span><strong>开店准备</strong><small>先完成基础配置，再亲自测试一笔流程</small></span>
+        <span class="setup-progress">{{ setupCompleted }} / 3 项基础配置已检测</span>
+      </summary>
+      <div class="setup-list">
+        <div v-for="step in setupSteps" :key="step.title" class="setup-row">
+          <span class="setup-status" :class="{ done: step.done }">{{ step.done ? '已配置' : '待配置' }}</span>
+          <span class="setup-copy"><strong>{{ step.title }}</strong><small>{{ step.detail }}</small></span>
+          <el-button v-if="step.allowed" link type="primary" @click="$router.push(step.route)">{{ step.done ? '查看' : '去配置' }}</el-button>
+          <small v-else>请联系管理员</small>
+        </div>
+        <div class="setup-manual">
+          <strong>还需人工确认</strong>
+          <span>核对收款方式、员工权限和知识内容，并以顾客身份测试咨询、转人工、下单及后续订单流程；配置存在不代表已验收。</span>
+          <el-button v-if="dashboard.setup.can_edit_staff" link type="primary" @click="$router.push('/user_list')">管理员工</el-button>
+        </div>
+      </div>
+    </details>
+
     <div class="outcome-grid" aria-label="核心经营结果">
       <article v-for="item in outcomes" :key="item.label" class="outcome-item">
         <div class="outcome-label"><el-icon><component :is="item.icon" /></el-icon>{{ item.label }}</div>
@@ -73,10 +93,10 @@
         </div>
         <div class="service-meter">
           <div class="meter-value">{{ percent(service.ai_resolution_rate) }}</div>
-          <div class="meter-track" aria-label="AI 独立解决率">
+          <div class="meter-track" aria-label="近 30 天未触发转人工的会话占比">
             <span :style="{ width: `${clampedRate}%` }"></span>
           </div>
-          <p>AI 独立解决率</p>
+          <p>近 30 天未触发转人工的会话占比，不代表问题已解决</p>
         </div>
         <dl class="service-facts">
           <div><dt>总咨询会话</dt><dd>{{ service.sessions || 0 }}</dd></div>
@@ -156,6 +176,7 @@ const dashboard = reactive({
   products: {},
   trend_7d: [],
   status_pie: [],
+  setup: null,
   business: { service: {}, conversion: {}, priorities: [] },
 })
 
@@ -165,6 +186,19 @@ const conversion = computed(() => business.value.conversion || {})
 const priorities = computed(() => business.value.priorities || [])
 const statusPie = computed(() => dashboard.status_pie || [])
 const isDemo = computed(() => business.value.data_source === 'demo')
+const setupSteps = computed(() => {
+  const setup = dashboard.setup || {}
+  const categories = setup.policy_categories || []
+  const missing = [['payment', '付款'], ['shipping', '配送'], ['refund', '售后']]
+    .filter(([code]) => !categories.includes(code)).map(([, label]) => label)
+  return [
+    { title: '填写店铺联系方式', detail: '设置顾客可联系的电话', done: setup.contact_configured, route: '/shop_settings', allowed: true },
+    { title: '上架商品', detail: '至少有一件商品处于上架状态', done: setup.product_published, route: '/product_list', allowed: setup.can_edit_product },
+    { title: '发布客服政策', detail: missing.length ? `尚未检测到已发布的${missing.join('、')}知识` : '已检测到付款、配送和售后知识，内容仍需核对', done: !missing.length, route: '/knowledge_base', allowed: setup.can_edit_knowledge },
+  ]
+})
+const setupCompleted = computed(() => setupSteps.value.filter(step => step.done).length)
+const setupIncomplete = computed(() => setupCompleted.value < setupSteps.value.length)
 const generatedAt = computed(() => {
   const value = business.value.generated_at
   if (!value) return ''
@@ -180,15 +214,15 @@ const outcomes = computed(() => [
     icon: Money,
   },
   {
-    label: 'AI 独立解决',
+    label: '未转人工会话占比',
     value: percent(service.value.ai_resolution_rate),
-    note: `${service.value.ai_resolved || 0} 个会话无需人工`,
+    note: `${service.value.ai_resolved || 0} 个会话未触发转人工，不代表已解决`,
     icon: ChatDotRound,
   },
   {
-    label: '估算节省工时',
+    label: '假设节省工时',
     value: `${Number(service.value.estimated_saved_hours || 0).toFixed(1)} 小时`,
-    note: `按每会话 ${service.value.baseline_minutes || 6} 分钟估算`,
+    note: `假设未转人工会话均节省 ${service.value.baseline_minutes || 6} 分钟`,
     icon: Timer,
   },
   {
@@ -269,6 +303,17 @@ onBeforeUnmount(() => {
 .head-actions { display: flex; align-items: center; gap: 12px; }
 .updated { color: #918b82; font-size: 12px; }
 .source-alert { margin-bottom: 14px; }
+.setup-guide { margin-bottom: 14px; border: 1px solid #c9dbd5; background: #f7fbf9; }
+.setup-guide summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px; cursor: pointer; }
+.setup-guide summary > span:first-child, .setup-copy { display: flex; flex-direction: column; gap: 4px; }
+.setup-guide summary small, .setup-copy small, .setup-manual span { color: #52645e; line-height: 1.5; }
+.setup-progress { flex: 0 0 auto; color: #315f52; font-size: 12px; }
+.setup-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid #dce9e3; }
+.setup-row > small { color: #52645e; }
+.setup-status { color: #80570e; font-size: 12px; }
+.setup-status.done { color: #246148; }
+.setup-manual { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 16px; border-top: 1px solid #dce9e3; font-size: 12px; }
+.setup-manual span { flex: 1 1 360px; }
 .outcome-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid #dfdbd3; background: #fff; }
 .outcome-item { min-width: 0; padding: 18px; border-right: 1px solid #ebe7df; }
 .outcome-item:last-child { border-right: 0; }

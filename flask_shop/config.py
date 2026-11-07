@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """电商平台配置。"""
 import os
+from urllib.parse import urlsplit
+from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import ArgumentError
 
 try:
     from dotenv import load_dotenv
@@ -32,9 +35,9 @@ class Config:
     if _db_url:
         SQLALCHEMY_DATABASE_URI = _db_url
     else:
-        SQLALCHEMY_DATABASE_URI = (
-            f'{MYSQL_DIALECT}+{MYSQL_DRIVER}://{MYSQL_USERNAME}:{MYSQL_PASSWORD}'
-            f'@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}?charset={MYSQL_CHARSET}'
+        SQLALCHEMY_DATABASE_URI = URL.create(
+            f'{MYSQL_DIALECT}+{MYSQL_DRIVER}', username=MYSQL_USERNAME, password=MYSQL_PASSWORD,
+            host=MYSQL_HOST, port=MYSQL_PORT, database=MYSQL_DB, query={'charset': MYSQL_CHARSET},
         )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
@@ -47,6 +50,7 @@ class Config:
         'CORS_ORIGINS',
         'http://localhost:8080,http://127.0.0.1:8080,http://localhost:8081,http://127.0.0.1:8081,http://localhost:5173,http://127.0.0.1:5173',
     )
+    TRUST_PROXY_HOPS = int(os.getenv('TRUST_PROXY_HOPS', '0'))
 
     COMPANY_SHORT_NAME = os.getenv('COMPANY_SHORT_NAME', '云购商城')
     DEFAULT_TENANT_SLUG = os.getenv('DEFAULT_TENANT_SLUG', 'demo')
@@ -57,12 +61,17 @@ class Config:
     SMS_DEV_CODE = os.getenv('SMS_DEV_CODE', '123456')
     SMS_DEV_COOLDOWN = int(os.getenv('SMS_DEV_COOLDOWN', '10'))
     SMS_COOLDOWN = int(os.getenv('SMS_COOLDOWN', '60'))
+    SMS_SEND_IP_LIMIT = int(os.getenv('SMS_SEND_IP_LIMIT', '10'))
+    SMS_SEND_IP_WINDOW_SECONDS = int(os.getenv('SMS_SEND_IP_WINDOW_SECONDS', '60'))
     SMS_PROVIDER = os.getenv('SMS_PROVIDER', 'console')
     SMS_HTTP_URL = os.getenv('SMS_HTTP_URL', '')
     SMS_HTTP_TOKEN = os.getenv('SMS_HTTP_TOKEN', '')
     SMS_CODE_EXPIRE_MINUTES = int(os.getenv('SMS_CODE_EXPIRE_MINUTES', '10'))
+    SMS_LOGIN_ATTEMPT_LIMIT = int(os.getenv('SMS_LOGIN_ATTEMPT_LIMIT', '5'))
+    SMS_LOGIN_LOCK_MINUTES = int(os.getenv('SMS_LOGIN_LOCK_MINUTES', '15'))
     PAY_DEFAULT_CHANNEL = os.getenv('PAY_DEFAULT_CHANNEL', 'mock')
     PLATFORM_BOOTSTRAP_KEY = os.getenv('PLATFORM_BOOTSTRAP_KEY', '')
+    PLATFORM_API_ENABLED = _env_bool('PLATFORM_API_ENABLED', '0')
     PUBLIC_BASE_URL = os.getenv('PUBLIC_BASE_URL', 'http://127.0.0.1:5000')
     CONTENT_PLATFORM_CONVERSION_WEBHOOK = os.getenv('CONTENT_PLATFORM_CONVERSION_WEBHOOK', '')
     CONTENT_PLATFORM_WEBHOOK_TOKEN = os.getenv('CONTENT_PLATFORM_WEBHOOK_TOKEN', '')
@@ -135,18 +144,43 @@ class ProductionConfig(Config):
         if not (cls.CORS_ORIGINS or []) and not allow_local:
             # 空 CORS 在同域 Nginx 反代时尚可；裸 API 对外时必须配
             pass
-        if not cls._db_url:
-            db_password = cls.MYSQL_PASSWORD or ''
+        try:
+            db_url = make_url(cls.SQLALCHEMY_DATABASE_URI)
+            if (db_url.drivername != 'mysql+pymysql' or not db_url.username or not db_url.database
+                    or not (db_url.host or db_url.query.get('unix_socket'))):
+                errors.append('生产环境必须配置完整的 mysql+pymysql 数据库连接')
+            if {str(key).lower() for key in db_url.query} & {'password', 'passwd', 'user', 'host', 'port', 'database', 'db'}:
+                errors.append('DATABASE_URL 查询参数不能覆盖数据库连接或凭据')
+            db_password = db_url.password or ''
             if db_password in ('', '123', 'change-me', 'change-me-db-password', 'root-change-me') or len(db_password) < 12:
                 errors.append('生产环境必须设置长度>=12的数据库密码')
+        except (ArgumentError, TypeError, ValueError):
+            errors.append('生产环境数据库连接格式无效')
         if not cls.SMS_DEV_MODE:
             provider = (cls.SMS_PROVIDER or '').strip().lower()
             if provider in ('', 'console', 'log', 'stdout'):
                 errors.append('生产环境必须配置真实 SMS_PROVIDER（不能使用 console）')
-            if provider in ('http', 'webhook', 'custom') and not (cls.SMS_HTTP_URL or '').strip():
-                errors.append('SMS_PROVIDER=http 时必须配置 SMS_HTTP_URL')
+            elif provider not in ('http', 'webhook', 'custom'):
+                errors.append('SMS_PROVIDER 尚未实现，请配置 http 短信网关')
+            else:
+                try:
+                    sms_url = urlsplit((cls.SMS_HTTP_URL or '').strip())
+                    valid_url = (sms_url.scheme in ('http', 'https') and bool(sms_url.hostname)
+                                 and not any(char.isspace() for char in sms_url.netloc)
+                                 and not sms_url.username and not sms_url.password)
+                    _ = sms_url.port
+                except ValueError:
+                    valid_url = False
+                if not valid_url:
+                    errors.append('SMS_PROVIDER=http 时必须配置有效的 SMS_HTTP_URL')
+                elif sms_url.scheme != 'https' and not _env_bool('PRIVATE_DEPLOY', '0'):
+                    errors.append('公网生产环境的短信网关必须使用 HTTPS')
         if cls.LOGIN_ACCOUNT_FAILURE_LIMIT < 3 or cls.LOGIN_LOCK_MINUTES < 1:
             errors.append('登录防爆破阈值配置不安全')
+        if not 1 <= cls.SMS_LOGIN_ATTEMPT_LIMIT <= 10 or cls.SMS_LOGIN_LOCK_MINUTES < 1:
+            errors.append('短信验证码防爆破阈值配置不安全')
+        if cls.SMS_COOLDOWN < 30 or cls.SMS_SEND_IP_LIMIT < 1 or cls.SMS_SEND_IP_WINDOW_SECONDS < 1:
+            errors.append('短信发送限流配置不安全')
         key = cls.PLATFORM_BOOTSTRAP_KEY or ''
         if (not key) or key in ('dev-platform-key-change-me',) or len(key) < 16:
             errors.append('生产环境必须设置足够强度的 PLATFORM_BOOTSTRAP_KEY')

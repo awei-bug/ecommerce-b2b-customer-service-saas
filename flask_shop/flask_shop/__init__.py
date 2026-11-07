@@ -31,73 +31,107 @@ def _is_already_exists(exc: Exception) -> bool:
 
 
 def ensure_schema_compat(app):
-    """轻量兼容：为已有库补租户扩展列（忽略已存在错误）。"""
+    """轻量兼容：先建新表，再为已有表补扩展列。
+
+    两次要点：
+    1. `create_all()` 必须在补列之前——空库上表还不存在，先补列必然全部失败，
+       而旧实现把 create_all 放在最后，会让全新数据库缺表。
+    2. 语句按方言渲染：`DATETIME` 只在 MySQL 存在，PostgreSQL 需要 `TIMESTAMP`。
+       补列后逐列复核，失败必须留痕——只 warn 会让某列永久缺失。
+    """
+    from sqlalchemy import inspect as sa_inspect
     from sqlalchemy import text
-    alters = [
-        "ALTER TABLE t_tenants ADD COLUMN theme VARCHAR(32) DEFAULT 'retail'",
-        "ALTER TABLE t_tenants ADD COLUMN data_mode VARCHAR(16) NOT NULL DEFAULT 'live'",
-        "ALTER TABLE t_tenants ADD COLUMN pay_qr_wechat VARCHAR(255)",
-        "ALTER TABLE t_tenants ADD COLUMN pay_qr_alipay VARCHAR(255)",
-        "ALTER TABLE t_order ADD COLUMN campaign_id VARCHAR(128)",
-        "ALTER TABLE t_order ADD COLUMN content_id VARCHAR(128)",
-        "ALTER TABLE t_order ADD COLUMN attribution_source VARCHAR(64)",
-        "ALTER TABLE t_order ADD COLUMN attribution_medium VARCHAR(64)",
-        "ALTER TABLE t_order ADD COLUMN consultation_session_id VARCHAR(64)",
-        "ALTER TABLE t_order ADD COLUMN buyer_paid_claimed INTEGER DEFAULT 0",
-        "ALTER TABLE t_order ADD COLUMN buyer_paid_at DATETIME",
-        "ALTER TABLE t_order ADD COLUMN buyer_paid_note VARCHAR(64)",
-        "ALTER TABLE t_order ADD COLUMN buyer_paid_proof VARCHAR(255)",
-        "ALTER TABLE t_order ADD COLUMN coupon_id INTEGER",
-        "ALTER TABLE t_order ADD COLUMN discount_amount DECIMAL(12,2) DEFAULT 0",
-        "ALTER TABLE t_product MODIFY COLUMN price DECIMAL(12,2)",
-        "ALTER TABLE t_order MODIFY COLUMN price DECIMAL(12,2)",
-        "ALTER TABLE t_order MODIFY COLUMN goods_amount DECIMAL(12,2)",
-        "ALTER TABLE t_order MODIFY COLUMN freight_amount DECIMAL(12,2)",
-        "ALTER TABLE t_order_detail MODIFY COLUMN price DECIMAL(12,2)",
-        "ALTER TABLE t_order_detail MODIFY COLUMN total_price DECIMAL(12,2)",
-        "ALTER TABLE t_payments MODIFY COLUMN amount DECIMAL(12,2)",
-        "ALTER TABLE t_coupons MODIFY COLUMN threshold DECIMAL(12,2)",
-        "ALTER TABLE t_coupons MODIFY COLUMN amount_off DECIMAL(12,2)",
-        "ALTER TABLE t_freight_templates MODIFY COLUMN fixed_fee DECIMAL(12,2)",
-        "ALTER TABLE t_freight_templates MODIFY COLUMN per_piece_fee DECIMAL(12,2)",
-        "ALTER TABLE t_freight_templates MODIFY COLUMN free_amount DECIMAL(12,2)",
-        "ALTER TABLE t_customer_addresses ADD COLUMN country_code VARCHAR(8) DEFAULT 'JP'",
-        "ALTER TABLE t_customer_addresses ADD COLUMN country_name VARCHAR(64)",
-        "ALTER TABLE t_customer_addresses ADD COLUMN postal_code VARCHAR(32)",
+
+    # (表, 列, {方言: 列定义})；"default" 用于其余方言。
+    columns = [
+        ("t_tenants", "theme", {"default": "VARCHAR(32) DEFAULT 'retail'"}),
+        ("t_tenants", "data_mode", {"default": "VARCHAR(16) NOT NULL DEFAULT 'live'"}),
+        ("t_tenants", "pay_qr_wechat", {"default": "VARCHAR(255)"}),
+        ("t_tenants", "pay_qr_alipay", {"default": "VARCHAR(255)"}),
+        ("t_order", "campaign_id", {"default": "VARCHAR(128)"}),
+        ("t_order", "content_id", {"default": "VARCHAR(128)"}),
+        ("t_order", "attribution_source", {"default": "VARCHAR(64)"}),
+        ("t_order", "attribution_medium", {"default": "VARCHAR(64)"}),
+        ("t_order", "consultation_session_id", {"default": "VARCHAR(64)"}),
+        ("t_order", "buyer_paid_claimed", {"default": "INTEGER DEFAULT 0"}),
+        ("t_order", "buyer_paid_at", {"mysql": "DATETIME", "default": "TIMESTAMP"}),
+        ("t_order", "buyer_paid_note", {"default": "VARCHAR(64)"}),
+        ("t_order", "buyer_paid_proof", {"default": "VARCHAR(255)"}),
+        ("t_order", "coupon_id", {"default": "INTEGER"}),
+        ("t_order", "discount_amount", {"default": "DECIMAL(12,2) DEFAULT 0"}),
+        ("t_customer_addresses", "country_code", {"default": "VARCHAR(8) DEFAULT 'JP'"}),
+        ("t_customer_addresses", "country_name", {"default": "VARCHAR(64)"}),
+        ("t_customer_addresses", "postal_code", {"default": "VARCHAR(32)"}),
     ]
-        # agent traces table created via db.create_all on develop; product uses migrate
 
     with app.app_context():
-        for sql in alters:
-            try:
-                db.session.execute(text(sql))
-                db.session.commit()
-            except Exception as exc:
-                db.session.rollback()
-                # 「列/索引已存在」是幂等补列的预期结果，可以静默；
-                # 其余失败必须留痕：否则这一列没补上，应用仍能正常启动，
-                # 直到线上真正读到该列才以 unknown column 崩掉，很难定位。
-                if not _is_already_exists(exc):
-                    app.logger.warning(
-                        'ensure_schema_compat 补列失败（该列可能缺失）: %s | %s', sql, exc,
-                    )
+        # 1) 先建表：全新库需要它；已有库上它是无副作用的空操作。
+        #    实测在 ensure_schema_compat 的嵌套 app context 里，db.create_all() 会
+        #    静默建出 0 张表（与 bind 的交互），因此真正的建表走 metadata.create_all；
+        #    之后再调一次 db.create_all()，保留既有安全测试断言的调用契约。
         try:
-            # 新表：多智能体轨迹
-            from flask_shop import models as _m
+            from flask_shop import models as _models  # noqa: F401  注册所有映射
+
+            db.metadata.create_all(bind=db.engine)
             db.create_all()
         except Exception:
             db.session.rollback()
             app.logger.exception('ensure_schema_compat create_all 失败，新表可能未创建')
 
+        # 2) 再补列
+        dialect = db.engine.dialect.name
+        inspector = sa_inspect(db.engine)
+
+        def current_columns(table):
+            try:
+                return {col['name'] for col in inspector.get_columns(table)}
+            except Exception:
+                return set()
+
+        for table, column, types in columns:
+            if column in current_columns(table):
+                continue
+            definition = types.get(dialect, types["default"])
+            sql = 'ALTER TABLE {} ADD COLUMN {} {}'.format(table, column, definition)
+            try:
+                db.session.execute(text(sql))
+                db.session.commit()
+            except Exception as exc:
+                db.session.rollback()
+                if not _is_already_exists(exc):
+                    app.logger.warning(
+                        'ensure_schema_compat 补列失败（该列可能缺失）: %s | %s', sql, exc,
+                    )
+
+        # 3) 复核：任何仍然缺失的列都必须能被发现，而不是只在日志里留一条 warning。
+        inspector = sa_inspect(db.engine)
+        missing = []
+        for table, column, _types in columns:
+            try:
+                if column not in {col['name'] for col in inspector.get_columns(table)}:
+                    missing.append('{}.{}'.format(table, column))
+            except Exception:
+                missing.append('{}.{}'.format(table, column))
+        if missing:
+            app.logger.error('ensure_schema_compat 补列后仍缺失: %s', ', '.join(missing))
 
 
+def configure_proxy(app):
+    hops = app.config.get('TRUST_PROXY_HOPS', 0)
+    if hops not in (0, 1):
+        raise RuntimeError('TRUST_PROXY_HOPS 仅支持 0 或 1')
+    if hops:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=0, x_host=0, x_port=0, x_prefix=0)
 
-def create_app(config_name):
+
+def create_app(config_name, *, initialize_schema=True, start_background=True):
     app = Flask(__name__, static_folder="static", static_url_path="/static")
     Config = config_map.get(config_name)
     if Config is None:
         raise RuntimeError(f'未知配置名 {config_name}，可选: {list(config_map.keys())}')
     app.config.from_object(Config)
+    configure_proxy(app)
 
     if config_name in ('product', 'sample') and hasattr(Config, 'validate'):
         Config.validate()
@@ -106,6 +140,26 @@ def create_app(config_name):
         weak = getattr(Config, 'WEAK_SECRETS', set())
         if (Config.SECRET_KEY or '') in weak:
             app.logger.warning('SECRET_KEY 仍是弱默认值，仅可用于本地开发')
+
+    from sqlalchemy.engine import make_url
+
+    database_url = make_url(app.config['SQLALCHEMY_DATABASE_URI'])
+    memory_sqlite = (database_url.get_backend_name() == 'sqlite' and
+                     (not database_url.database or ':memory:' in database_url.database or
+                      database_url.query.get('mode') == 'memory'))
+    binds = dict(app.config.get('SQLALCHEMY_BINDS') or {})
+    if '_audit' in binds:
+        raise RuntimeError('数据库绑定名 _audit 由审计系统保留')
+    audit_options = dict(app.config.get('SQLALCHEMY_ENGINE_OPTIONS') or {})
+    audit_options.pop('poolclass', None)
+    if memory_sqlite:
+        for option in ('pool_size', 'max_overflow', 'pool_timeout'):
+            audit_options.pop(option, None)
+        audit_options['url'] = database_url
+    else:
+        audit_options.update(url=database_url, pool_size=2, max_overflow=0, pool_timeout=1)
+    binds['_audit'] = audit_options
+    app.config['SQLALCHEMY_BINDS'] = binds
 
     db.init_app(app)
 
@@ -128,21 +182,37 @@ def create_app(config_name):
     # 自动多租户隔离（before_compile）
     from flask_shop.utils.tenant_query import install_tenant_query
     install_tenant_query()
-    try:
-        ensure_schema_compat(app)
-    except Exception:
-        app.logger.exception('ensure_schema_compat failed')
+    if initialize_schema:
+        if config_name == 'product':
+            from flask_shop import models
+            from flask_shop.utils.schema_audit import schema_problems
 
-    try:
-        from flask_shop.utils.order_timeout import start_timeout_loop
-        start_timeout_loop(app)
-    except Exception:
-        app.logger.exception('start_timeout_loop failed')
+            with app.app_context():
+                problems = schema_problems(db.engine, db.metadata)
+            if problems:
+                raise RuntimeError('数据库结构检查失败，生产启动不会自动修改数据库: ' + '; '.join(problems))
+        else:
+            try:
+                ensure_schema_compat(app)
+            except Exception:
+                app.logger.exception('ensure_schema_compat failed')
+
+    if start_background:
+        try:
+            from flask_shop.utils.order_timeout import start_timeout_loop
+            start_timeout_loop(app)
+        except Exception:
+            app.logger.exception('start_timeout_loop failed')
 
     import os
     upload_folder = os.path.join(os.path.dirname(__file__), 'static', 'upload')
     os.makedirs(upload_folder, exist_ok=True)
     app.config.setdefault('UPLOAD_FOLDER', upload_folder)
+    app.config['PAY_PROOF_FOLDER'] = os.getenv('PAY_PROOF_FOLDER') or os.path.join(app.instance_path, 'pay_proofs')
+    from pathlib import Path
+    if Path(app.config['PAY_PROOF_FOLDER']).resolve().is_relative_to(Path(app.static_folder).resolve()):
+        raise RuntimeError('付款截图存储目录不能位于静态目录内')
+    os.makedirs(app.config['PAY_PROOF_FOLDER'], exist_ok=True)
 
     @app.before_request
     def _init_context():
@@ -152,6 +222,12 @@ def create_app(config_name):
         g.user_id = None
         g.customer_id = None
         g.token_payload = None
+
+    @app.before_request
+    def _block_public_pay_proof():
+        import re
+        if re.match(r'^/static/upload/[^/]+/pay_proof(?:/|$)', request.path, re.I):
+            return '', 404
 
     # —— 核心商城 ——
     from flask_shop.user import user_bp
@@ -215,6 +291,8 @@ def create_app(config_name):
     @app.route('/metrics/')
     def metrics():
         """轻量监控：库连通、订单积压、Agent 轨迹。"""
+        if config_name == 'product':
+            return {'status': 404, 'msg': 'not found'}, 404
         import time
         from flask_shop import models
         from flask_shop.utils.tenant_query import tenant_context

@@ -8,12 +8,41 @@
     <div class="page-title-row">
         <div class="page-title">商品列表</div>
         <div class="title-actions">
+            <el-button @click="toggleHubOverview">商品同步记录</el-button>
             <el-button @click="openBatch" :disabled="!selected.length">批量改库存</el-button>
             <el-button type="success" plain @click="openCoverBatch">批量补主图</el-button>
             <el-button type="warning" @click="openPackImport">上传成品包上架</el-button>
             <el-button type="primary" @click="addProduct">添加商品</el-button>
         </div>
     </div>
+        <section v-if="hubOpen" class="hub-overview" aria-label="商品同步记录" v-loading="hubLoading">
+          <div class="hub-overview-head">
+            <div><strong>商品同步记录</strong><p>仅显示本店已接收的商品和最近一次自动同步记录。</p></div>
+            <el-button size="small" @click="loadHubOverview" :loading="hubLoading">刷新</el-button>
+          </div>
+          <el-alert v-if="hubError" :title="hubError" type="error" :closable="false" show-icon />
+          <template v-else-if="hubOverview">
+            <p v-if="!hubOverview.available">当前店铺未启用演示商品同步。</p>
+            <template v-else>
+              <p v-if="hubOverview.last_cycle">最近记录：{{ formatHubTime(hubOverview.last_cycle.recorded_at) }} · {{ cycleLabel(hubOverview.last_cycle.status) }} · 新建 {{ hubOverview.last_cycle.created }}，更新 {{ hubOverview.last_cycle.updated }}，待补价 {{ hubOverview.last_cycle.pending }}，失败 {{ hubOverview.last_cycle.errors }}</p>
+              <p v-else>暂无自动同步记录，请检查同步进程是否启动。</p>
+              <p v-if="hubOverview.last_cycle?.failure_message" role="alert">{{ hubOverview.last_cycle.failure_message }}</p>
+              <div v-if="hubOverview.last_cycle?.issues?.length" class="hub-issues" role="region" aria-label="同步失败商品">
+                <strong>需要处理的商品</strong>
+                <ul><li v-for="(issue, index) in hubOverview.last_cycle.issues" :key="index"><span>{{ issue.external_id || '商品 ID 缺失' }}</span>：{{ issue.message }}</li></ul>
+                <p v-if="hubOverview.last_cycle.issues_truncated">仅显示部分失败商品，处理后可查看下一轮结果。</p>
+              </div>
+              <p class="hub-hint">记录时间不代表同步进程当前在线；列表最多显示最近 50 条。</p>
+              <el-table :data="hubOverview.items" size="small" empty-text="暂无已接收商品">
+                <el-table-column prop="name" label="商品" min-width="130" show-overflow-tooltip />
+                <el-table-column prop="external_id" label="商品 ID" min-width="180" show-overflow-tooltip />
+                <el-table-column label="商城状态" width="100"><template #default="{ row }">{{ hubStateLabel(row.state) }}</template></el-table-column>
+                <el-table-column label="最近同步" min-width="150"><template #default="{ row }">{{ formatHubTime(row.synced_at) }}</template></el-table-column>
+                <el-table-column label="操作" width="100"><template #default="{ row }"><el-button v-if="row.state === 'pending_price'" link type="primary" :disabled="hubPriceSaving" @click="completeHubPrice(row)">补售价</el-button></template></el-table-column>
+              </el-table>
+            </template>
+          </template>
+        </section>
         <el-row :gutter="12" class="toolbar">
             <el-col :span="8">
                 <el-input v-model="productTable.searchKey" placeholder="请输入要搜索的商品" clearable @clear="getProductList">
@@ -293,6 +322,44 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 const productTable = reactive({ data: [], searchKey: null })
 const router = useRouter()
 const loading = ref(false)
+const hubOpen = ref(false)
+const hubLoading = ref(false)
+const hubOverview = ref(null)
+const hubError = ref('')
+const hubPriceSaving = ref(false)
+const hubStateLabel = (state) => ({ published: '已上架', draft: '草稿/下架', pending_price: '待补价', unavailable: '关联不可用' }[state] || '未知')
+const cycleLabel = (state) => ({ success: '已完成', partial: '部分失败', failed: '同步失败' }[state] || '未知')
+const formatHubTime = (value) => value ? String(value).replace('T', ' ').slice(0, 19) : '暂无'
+const loadHubOverview = async () => {
+    hubLoading.value = true
+    hubError.value = ''
+    try {
+        const res = await api.get_hub_sync_overview()
+        if (res?.data?.status === 200) hubOverview.value = res.data.data
+        else { hubOverview.value = null; hubError.value = res?.data?.msg || '无法读取商品同步记录' }
+    } catch (error) {
+        hubOverview.value = null
+        hubError.value = error?.userMessage || '无法读取商品同步记录，请稍后重试'
+    } finally { hubLoading.value = false }
+}
+const toggleHubOverview = () => { hubOpen.value = !hubOpen.value; if (hubOpen.value) loadHubOverview() }
+const completeHubPrice = async (row) => {
+    const input = await ElMessageBox.prompt(`为“${row.name}”填写售价，确认后创建商品草稿；上架前请核对。`, '补充商品售价', {
+        confirmButtonText: '创建草稿', cancelButtonText: '取消', inputPlaceholder: '例如 129.00',
+        inputValidator: value => /^(?:\d{1,10})(?:\.\d{1,2})?$/.test(String(value || '').trim()) && Number(value) > 0 || '请输入大于零、最多两位小数的售价',
+    }).catch(() => null)
+    if (!input) return
+    hubPriceSaving.value = true
+    try {
+        const res = await api.set_hub_pending_price(row.knowledge_id, input.value.trim())
+        if (res?.data?.status === 200) ElMessage.success(res.data.msg)
+        else ElMessage.warning(res?.data?.msg || '创建草稿失败')
+        await loadHubOverview()
+        getProductList()
+    } catch (error) {
+        ElMessage.error(error?.userMessage || '创建草稿失败，请稍后重试')
+    } finally { hubPriceSaving.value = false }
+}
 const editVisible = ref(false)
 const saving = ref(false)
 const aiGen = ref(false)
@@ -670,6 +737,11 @@ onMounted(getProductList)
 </script>
 
 <style scoped>
+.hub-overview { margin: 16px 0; padding: 16px; border: 1px solid #dedbd3; border-radius: 8px; }
+.hub-overview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.hub-overview p { margin: 6px 0 12px; color: #57534e; font-size: 13px; line-height: 1.5; }
+.hub-overview .hub-hint { color: #57534e; }
+.hub-issues ul { padding-left: 20px; line-height: 1.6; overflow-wrap: anywhere; }
 .crumb { margin-bottom: 12px; }
 .page-title-row {
   display: flex; justify-content: space-between; align-items: center;

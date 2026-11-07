@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""将 deploy/backups 下某个 sql 恢复到临时库 flask_shop_restore（不覆盖正式库）。"""
+"""将可信 SQL 备份恢复到新建的随机临时库。"""
 from __future__ import annotations
 
 import os
-import re
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 import pymysql
 
@@ -24,10 +24,12 @@ HOST = os.getenv("MYSQL_HOST", "127.0.0.1")
 PORT = int(os.getenv("MYSQL_PORT", "3307"))
 USER = os.getenv("MYSQL_USERNAME", "root")
 PWD = os.getenv("MYSQL_PASSWORD", "123456")
-RESTORE_DB = os.getenv("RESTORE_DB", "flask_shop_restore")
 
 
 def main():
+    if os.getenv("RESTORE_DB"):
+        print("RESTORE_DB is no longer supported; a new random database is required")
+        return 1
     if len(sys.argv) < 2:
         files = sorted(BACKUP_DIR.glob("*.sql"), key=lambda p: p.stat().st_mtime, reverse=True)
         if not files:
@@ -41,14 +43,25 @@ def main():
         print("not found", sql_path)
         return 1
 
-    sql = sql_path.read_text(encoding="utf-8", errors="replace")
+    try:
+        sql = sql_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        print("cannot read backup:", exc)
+        return 1
+    if not sql.strip():
+        print("backup is empty")
+        return 1
+    restore_db = f"shop_restore_{uuid4().hex}"
     conn = pymysql.connect(host=HOST, port=PORT, user=USER, password=PWD, charset="utf8mb4", autocommit=True)
     cur = conn.cursor()
-    cur.execute(f"DROP DATABASE IF EXISTS `{RESTORE_DB}`")
-    cur.execute(
-        f"CREATE DATABASE `{RESTORE_DB}` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-    )
-    cur.execute(f"USE `{RESTORE_DB}`")
+    try:
+        cur.execute(
+            f"CREATE DATABASE `{restore_db}` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+        )
+        cur.execute(f"USE `{restore_db}`")
+    except Exception:
+        conn.close()
+        raise
     # naive split on ;\n
     statements = []
     buf = []
@@ -75,10 +88,10 @@ def main():
                 print("warn", str(e)[:120])
     cur.execute(f"SHOW TABLES")
     tables = cur.fetchall()
-    print(f"RESTORE_OK db={RESTORE_DB} statements_ok={ok} fail={fail} tables={len(tables)}")
-    print("正式库 flask_shop 未被覆盖。确认无误后可手工导入正式库。")
+    print(f"{'RESTORE_OK' if fail == 0 and ok > 0 else 'RESTORE_FAILED'} db={restore_db} statements_ok={ok} fail={fail} tables={len(tables)}")
+    print("临时库已保留，检查后请由管理员确认并删除。只应恢复可信备份至隔离的 MySQL 实例。")
     conn.close()
-    return 0
+    return 0 if fail == 0 and ok > 0 else 1
 
 
 if __name__ == "__main__":

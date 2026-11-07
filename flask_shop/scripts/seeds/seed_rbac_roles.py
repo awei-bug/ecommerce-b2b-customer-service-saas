@@ -1,7 +1,7 @@
 """
 动作级 RBAC 角色模板种子。
 
-为每个活跃租户确保：
+为每个活跃的演示租户确保：
   - 店员 / 仓管 / 运营 / 客服 角色（含 menu + perm_codes）
   - 可选账号：
       clerk / 123456   店员
@@ -23,8 +23,10 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from flask_shop import create_app, db, models  # noqa: E402
+from flask_shop.utils.demo_seed import reject_production_demo_seed  # noqa: E402
 from flask_shop.utils.rbac import ROLE_TEMPLATES  # noqa: E402
 
+reject_production_demo_seed()
 app = create_app('develop')
 
 USER_SPECS = {
@@ -91,7 +93,7 @@ def main(with_users=False):
             print('migrate note', e)
             db.session.rollback()
 
-        tenants = models.Tenant.query.filter_by(status=1).all()
+        tenants = models.Tenant.query.filter_by(status=1, data_mode='demo').all()
         if not tenants:
             print('no tenants')
             return

@@ -28,7 +28,7 @@ from flask_shop.utils.token import (
     customer_login_required,
     generate_customer_token,
 )
-from flask_shop.utils.sms import normalize_phone, send_login_code, verify_login_code
+from flask_shop.utils.sms import SMS_LOCKED_MESSAGE, SMS_SEND_LIMIT_MESSAGE, normalize_phone, send_login_code, verify_login_code
 from flask_shop.pay.views import mark_payment_success
 
 
@@ -251,6 +251,8 @@ def auth_sms_send():
     tenant_id = require_tenant_id()
     payload, err = send_login_code(tenant_id, phone)
     if err:
+        if err == SMS_SEND_LIMIT_MESSAGE:
+            return {'status': 429, 'msg': err}, 429
         return {'status': 400, 'msg': err}
     phone_n = normalize_phone(phone)
     data = {
@@ -287,6 +289,8 @@ def auth_sms_login():
     tenant_id = require_tenant_id()
     ok, err = verify_login_code(tenant_id, phone, code)
     if not ok:
+        if err == SMS_LOCKED_MESSAGE:
+            return {'status': 429, 'msg': err}, 429
         return {'status': 400, 'msg': err or '验证码错误'}
 
     customer = models.Customer.query.filter_by(
@@ -789,8 +793,20 @@ def c_order_detail(id):
 # ---------- 支付 ----------
 
 
+@c_bp.route('/order/<int:id>/pay-proof/', methods=['GET'])
+@customer_login_required
+def c_pay_proof(id):
+    from flask_shop.utils.pay_proof import send_order_proof
+
+    order = models.Order.query.filter_by(
+        id=id, tenant_id=require_tenant_id(), customer_id=g.customer_id,
+    ).first_or_404()
+    return send_order_proof(order)
+
+
 def _save_pay_proof(file_storage, tenant_id):
     import os
+    from flask_shop.utils.pay_proof import valid_proof_image
     if not file_storage or not getattr(file_storage, "filename", None):
         return None, None
     name = str(file_storage.filename or "")
@@ -807,12 +823,16 @@ def _save_pay_proof(file_storage, tenant_id):
         return None, "文件为空"
     if size > max_bytes:
         return None, "截图不能超过 5MB"
-    folder = current_app.config.get("UPLOAD_FOLDER")
-    sub = os.path.join(folder, str(tenant_id), "pay_proof")
+    content = file_storage.stream.read(max_bytes + 1)
+    if len(content) != size or not valid_proof_image(content, ext):
+        return None, "截图格式无效或图片尺寸过大"
+    folder = current_app.config["PAY_PROOF_FOLDER"]
+    sub = os.path.join(folder, str(tenant_id))
     os.makedirs(sub, exist_ok=True)
     fname = uuid.uuid4().hex + "." + ext
-    file_storage.save(os.path.join(sub, fname))
-    return f"/static/upload/{tenant_id}/pay_proof/{fname}", None
+    with open(os.path.join(sub, fname), 'xb') as output:
+        output.write(content)
+    return f"private-pay-proof/{tenant_id}/{fname}", None
 
 
 @c_bp.route("/order/<int:id>/claim-paid/", methods=["POST"])
@@ -823,7 +843,7 @@ def c_claim_paid(id):
     tenant_id = require_tenant_id()
     order = models.Order.query.filter_by(
         id=id, tenant_id=tenant_id, customer_id=g.customer_id
-    ).first()
+    ).populate_existing().with_for_update().first()
     if not order:
         return {"status": 404, "msg": "订单不存在"}
     if (order.status or "") != PENDING_PAY:
@@ -865,14 +885,19 @@ def c_pay_create():
         return {'status': 400, 'msg': f'仅待支付订单可支付，当前：{order.status}'}
 
     channel_name = (body.get('channel') or get_default_channel_name()).lower()
+    try:
+        channel = get_channel(channel_name)
+    except PayChannelError as e:
+        return {'status': e.code, 'msg': e.message}
     existing = models.Payment.query.filter(
         models.Payment.tenant_id == tenant_id,
         models.Payment.order_id == order.id,
         models.Payment.status.in_(['created', 'paying']),
     ).order_by(models.Payment.id.desc()).first()
     if existing:
+        if existing.channel != channel.name:
+            return {'status': 409, 'msg': '订单已有其他渠道的待支付单，请联系商家核对'}
         try:
-            channel = get_channel(existing.channel or channel_name)
             prepay = channel.prepay(existing, order)
         except PayChannelError as e:
             return {'status': e.code, 'msg': e.message}
@@ -882,11 +907,6 @@ def c_pay_create():
             'msg': '已有待支付单',
             'data': {'payment': existing.to_dict(), 'prepay': prepay},
         }
-
-    try:
-        channel = get_channel(channel_name)
-    except PayChannelError as e:
-        return {'status': e.code, 'msg': e.message}
 
     payment = models.Payment(
         tenant_id=tenant_id,
@@ -934,6 +954,9 @@ def c_pay_mock():
     ).first()
     if not order:
         return {'status': 404, 'msg': '订单不存在'}
+
+    if payment.channel != 'mock':
+        return {'status': 400, 'msg': '非模拟支付单不可使用模拟支付'}
 
     try:
         payment, changed = mark_payment_success(payment, raw_notify=body)

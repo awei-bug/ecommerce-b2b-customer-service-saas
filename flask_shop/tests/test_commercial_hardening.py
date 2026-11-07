@@ -35,6 +35,7 @@ def test_production_validate_rejects_console_sms_and_weak_database_password():
         SMS_DEV_MODE = False
         SMS_PROVIDER = 'console'
         MYSQL_PASSWORD = 'short'
+        SQLALCHEMY_DATABASE_URI = 'mysql+pymysql://shop:short@localhost/shop'
         PLATFORM_BOOTSTRAP_KEY = 'p' * 32
         CORS_ORIGINS = ['https://shop.example.com']
         PUBLIC_BASE_URL = 'https://shop.example.com'
@@ -47,8 +48,66 @@ def test_production_validate_rejects_console_sms_and_weak_database_password():
     assert 'SMS_PROVIDER' in message
 
 
-def test_create_app_develop_ok():
+def test_production_rejects_unimplemented_or_insecure_sms_provider(monkeypatch):
+    monkeypatch.setenv('PRIVATE_DEPLOY', '0')
+
+    class Config(ProductionConfig):
+        SECRET_KEY = 'x' * 48
+        ALLOW_MOCK_PAY = False
+        SMS_DEV_MODE = False
+        SMS_PROVIDER = 'aliyun'
+        SMS_HTTP_URL = 'https://sms.example.test/send'
+        MYSQL_PASSWORD = 'strong-database-password'
+        SQLALCHEMY_DATABASE_URI = 'mysql+pymysql://shop:strong-database-password@localhost/shop'
+        PLATFORM_BOOTSTRAP_KEY = 'p' * 32
+        CORS_ORIGINS = ['https://shop.example.com']
+        PUBLIC_BASE_URL = 'https://shop.example.com'
+        _db_url = ''
+
+    with pytest.raises(RuntimeError, match='SMS_PROVIDER 尚未实现'):
+        Config.validate()
+    Config.SMS_PROVIDER = 'http'
+    Config.SMS_HTTP_URL = 'http://sms.example.test/send'
+    with pytest.raises(RuntimeError, match='HTTPS'):
+        Config.validate()
+    Config.SMS_HTTP_URL = 'https://sms.example.test:invalid/send'
+    with pytest.raises(RuntimeError, match='SMS_HTTP_URL'):
+        Config.validate()
+    Config.SMS_HTTP_URL = 'https://sms.example.test/send'
+    Config.validate()
+
+
+def test_production_validates_effective_database_url_without_leaking_secrets(monkeypatch):
+    monkeypatch.setenv('PRIVATE_DEPLOY', '0')
+
+    class Config(ProductionConfig):
+        SECRET_KEY = 'x' * 48
+        ALLOW_MOCK_PAY = False
+        SMS_DEV_MODE = False
+        SMS_PROVIDER = 'http'
+        SMS_HTTP_URL = 'https://sms.example.test/send'
+        PLATFORM_BOOTSTRAP_KEY = 'p' * 32
+        CORS_ORIGINS = ['https://shop.example.com']
+        PUBLIC_BASE_URL = 'https://shop.example.com'
+
+    for uri in ('mysql+pymysql://shop:weak@db/shop', 'sqlite:///shop.sqlite',
+                'mysql+pymysql://shop:very-strong-password@db/shop?password=weak',
+                'not-a-database-url-SECRET-EXAMPLE'):
+        Config.SQLALCHEMY_DATABASE_URI = uri
+        with pytest.raises(RuntimeError) as error:
+            Config.validate()
+        assert '数据库' in str(error.value) or 'DATABASE_URL' in str(error.value)
+        assert 'SECRET-EXAMPLE' not in str(error.value)
+
+    Config.SQLALCHEMY_DATABASE_URI = 'mysql+pymysql://shop:strong%40secret%3Apassword@db/shop'
+    Config.validate()
+
+
+def test_create_app_develop_ok(monkeypatch, tmp_path):
+    from config import DevelopmentConfig
     from flask_shop import create_app
+    monkeypatch.setattr(DevelopmentConfig, 'SQLALCHEMY_DATABASE_URI', f'sqlite:///{tmp_path / "develop-test.sqlite"}')
+    monkeypatch.setattr(DevelopmentConfig, 'ORDER_PENDING_TIMEOUT_MINUTES', 0)
     app = create_app('develop')
     assert app.config.get('DEBUG') is True
 

@@ -10,13 +10,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
-os.environ.pop("DATABASE_URL", None)
 
 from dotenv import load_dotenv
 
-load_dotenv(ROOT / ".env", override=True)
+load_dotenv(ROOT / ".env", override=False)
 
 from flask_shop import create_app, db, models
+from flask_shop.utils.demo_seed import reject_production_demo_seed
 from flask_shop.utils.tenant_query import tenant_context
 
 DEFAULT_PAY = """【个人收款付款说明】
@@ -33,12 +33,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true", help="强制覆盖已有 pay_guide")
     args = ap.parse_args()
+    reject_production_demo_seed()
     app = create_app(os.getenv("FLASK_CONFIG") or "develop")
     with app.app_context():
         with tenant_context(disabled=True):
             t = models.Tenant.query.filter_by(slug="demo").first()
             if not t:
                 print("no demo tenant")
+                return 1
+            if t.data_mode != 'demo':
+                print('拒绝修改非演示模式的 demo 店铺')
                 return 1
             if args.force or not (t.pay_guide or "").strip():
                 t.pay_guide = DEFAULT_PAY

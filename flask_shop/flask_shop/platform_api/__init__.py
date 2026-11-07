@@ -8,9 +8,12 @@ import os
 import re
 
 from flask import Blueprint, request
+from sqlalchemy.exc import IntegrityError
 
 from flask_shop import db, models
+from flask_shop.tenant_onboarding import OnboardingError, create_formal_tenant
 from flask_shop.utils.audit import write_audit
+from flask_shop.utils.tenant_query import tenant_context
 
 platform_bp = Blueprint('platform', __name__, url_prefix='/api/p')
 
@@ -20,6 +23,8 @@ SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$')
 def _check_platform_key():
     from flask import current_app
     import hmac
+    if not current_app.config.get('PLATFORM_API_ENABLED', False):
+        return False, ({'status': 403, 'msg': '平台管理接口未启用'}, 403)
     expected = (
         current_app.config.get('PLATFORM_BOOTSTRAP_KEY')
         or os.getenv('PLATFORM_BOOTSTRAP_KEY', '')
@@ -28,7 +33,7 @@ def _check_platform_key():
     if not expected:
         return False, {'status': 503, 'msg': '未配置 PLATFORM_BOOTSTRAP_KEY，拒绝开通'}
     got = request.headers.get('X-Platform-Key') or ''
-    if not hmac.compare_digest(str(got), str(expected)):
+    if not hmac.compare_digest(str(got).encode('utf-8'), str(expected).encode('utf-8')):
         return False, {'status': 401, 'msg': '平台密钥无效'}
     return True, None
 
@@ -54,7 +59,12 @@ def create_tenant():
     if not ok:
         return err
 
-    body = request.get_json(silent=True) or {}
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return {'status': 400, 'msg': '请求体必须是 JSON 对象'}
+    fields = ('name', 'slug', 'admin_name', 'admin_password', 'plan_code', 'admin_nick', 'admin_phone', 'admin_email')
+    if any(key in body and body[key] is not None and not isinstance(body[key], str) for key in fields):
+        return {'status': 400, 'msg': '开店字段必须为字符串'}
     name = (body.get('name') or '').strip()
     slug = (body.get('slug') or '').strip().lower()
     admin_name = (body.get('admin_name') or '').strip()
@@ -65,41 +75,23 @@ def create_tenant():
         return {'status': 400, 'msg': 'name/slug/admin_name/admin_password 必填'}
     if not SLUG_RE.match(slug):
         return {'status': 400, 'msg': 'slug 仅允许小写字母数字与中划线，长度 3～32'}
-    if len(admin_password) < 8:
-        return {'status': 400, 'msg': '管理员密码至少 8 位'}
-
-    if models.Tenant.query.filter_by(slug=slug).first():
-        return {'status': 400, 'msg': 'slug 已存在'}
-
-    tenant = models.Tenant(name=name, slug=slug, status=1, plan_code=plan_code)
-    db.session.add(tenant)
-    db.session.flush()
-
-    # 绑定平台菜单模板（若已有）
-    menus = models.Menu.query.all()
-    role = models.Role(tenant_id=tenant.id, name='超级管理员', desc=f'{name}全部权限')
-    if menus:
-        role.menus = list(menus)
-    db.session.add(role)
-    db.session.flush()
-
-    # 租户内管理员名唯一
-    exists = models.User.query.filter_by(tenant_id=tenant.id, name=admin_name).first()
-    if exists:
+    try:
+        result = create_formal_tenant(
+            slug=slug, name=name, admin_name=admin_name, admin_password=admin_password,
+            admin_nickname=body.get('admin_nick') or f'{name}管理员',
+            admin_phone=body.get('admin_phone') or '', admin_email=body.get('admin_email') or '',
+            plan_code=plan_code,
+        )
+    except OnboardingError as exc:
         db.session.rollback()
-        return {'status': 400, 'msg': '管理员账号已存在'}
+        return {'status': 400, 'msg': str(exc)}
+    except IntegrityError:
+        db.session.rollback()
+        return {'status': 400, 'msg': '团队标识或账号已存在，请检查后重试'}
 
-    user = models.User(
-        tenant_id=tenant.id,
-        name=admin_name,
-        nick_name=body.get('admin_nick') or f'{name}管理员',
-        phone=body.get('admin_phone'),
-        email=body.get('admin_email'),
-        role_id=role.id,
-    )
-    user.password = admin_password
-    db.session.add(user)
-    db.session.commit()
+    with tenant_context(disabled=True):
+        tenant = db.session.get(models.Tenant, result['tenant_id'])
+        user = models.User.query.filter_by(tenant_id=tenant.id, name=admin_name).one()
 
     write_audit(
         action='platform.tenant.create',
@@ -116,7 +108,7 @@ def create_tenant():
         'msg': '租户开通成功',
         'data': {
             'tenant': tenant.to_dict(),
-            'admin': {'id': user.id, 'name': user.name, 'role_id': role.id},
+            'admin': {'id': user.id, 'name': user.name, 'role_id': user.role_id},
         }
     }
 

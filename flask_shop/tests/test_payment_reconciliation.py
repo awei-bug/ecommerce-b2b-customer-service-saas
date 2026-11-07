@@ -11,9 +11,11 @@
 """
 import csv
 import io
+from unittest.mock import patch
 
 from flask_shop import db, models
 from flask_shop.utils.tenant_query import tenant_context
+from flask_shop.utils.token import generate_customer_token
 
 
 # ---------- 夹具辅助 ----------
@@ -49,6 +51,107 @@ def _mock_notify(client, token, out_trade_no, result='success'):
         headers={'token': token},
     )
     return rv.get_json()
+
+
+def test_unverified_wechat_channel_fails_closed_without_changing_orders(api, app):
+    client, seed = api['client'], api['seed']
+    product_id = _stock_product(app, seed['id_a'], '微信安全闸门测试')
+    order = _create_order(client, seed['token_a'], product_id)['data']
+    response = client.post('/pay/create/', json={'order_id': order['id'], 'channel': 'wechat'},
+                           headers={'token': seed['token_a']}).get_json()
+    assert response['status'] == 503
+    with tenant_context(disabled=True):
+        assert models.Payment.query.filter_by(order_id=order['id']).count() == 0
+        payment = models.Payment(tenant_id=seed['id_a'], order_id=order['id'],
+                                 out_trade_no='wechat-existing-test', channel='wechat',
+                                 amount=order['price'], status='paying')
+        db.session.add(payment)
+        db.session.commit()
+        payment_id = payment.id
+    callback = client.post('/pay/wechat/notify/', json={'out_trade_no': 'wechat-existing-test'})
+    assert callback.status_code == 503
+    query = client.get('/pay/wechat/query/wechat-existing-test/', headers={'token': seed['token_a']})
+    assert query.get_json()['status'] == 503
+    db.session.expire_all()
+    with tenant_context(disabled=True):
+        assert db.session.get(models.Payment, payment_id).status == 'paying'
+        assert db.session.get(models.Order, order['id']).status == 'pending_pay'
+
+
+def test_wechat_channel_status_distinguishes_configuration_from_availability(api, app):
+    with patch('flask_shop.utils.pay_channel.WechatChannel.is_configured', return_value=(True, [])):
+        result = api['client'].get('/pay/channel/status/', headers={'token': api['seed']['token_a']}).get_json()
+    assert result['data']['wechat']['configured'] is True
+    assert result['data']['wechat']['available'] is False
+
+
+def test_mock_endpoints_cannot_modify_non_mock_payment_and_channel_switch_is_rejected(api, app):
+    client, seed = api['client'], api['seed']
+    with tenant_context(disabled=True):
+        customer = models.Customer(tenant_id=seed['id_a'], phone='13900001111', status=1)
+        db.session.add(customer)
+        db.session.flush()
+        order = db.session.get(models.Order, seed['order_a'].id)
+        order.customer_id = customer.id
+        payment = models.Payment(tenant_id=seed['id_a'], order_id=order.id,
+                                 out_trade_no='wechat-not-mock', channel='wechat',
+                                 amount=order.price, status='paying')
+        db.session.add(payment)
+        db.session.commit()
+        token = generate_customer_token(customer)
+        other = models.Customer(tenant_id=seed['id_a'], phone='13900002222', status=1)
+        db.session.add(other)
+        db.session.commit()
+        other_token = generate_customer_token(other)
+        order_id = order.id
+        payment_id = payment.id
+    customer_headers = {'token': token, 'X-Tenant-Slug': 'test-a'}
+    staff_headers = {'token': seed['token_a']}
+    for result in ('success', 'fail'):
+        response = client.post('/pay/mock/notify/', headers=staff_headers,
+            json={'out_trade_no': 'wechat-not-mock', 'result': result}).get_json()
+        assert response['status'] == 400
+    response = client.post('/api/c/pay/mock/', headers=customer_headers,
+                           json={'out_trade_no': 'wechat-not-mock'}).get_json()
+    assert response['status'] == 400
+    response = client.post('/api/c/pay/mock/', headers={'token': other_token, 'X-Tenant-Slug': 'test-a'},
+                           json={'out_trade_no': 'wechat-not-mock'}).get_json()
+    assert response['status'] == 404
+    for endpoint, headers in [('/pay/create/', staff_headers), ('/api/c/pay/create/', customer_headers)]:
+        response = client.post(endpoint, headers=headers,
+                               json={'order_id': order_id, 'channel': 'mock'}).get_json()
+        assert response['status'] == 409
+    db.session.expire_all()
+    with tenant_context(disabled=True):
+        assert db.session.get(models.Payment, payment_id).status == 'paying'
+        assert db.session.get(models.Order, order_id).status == 'pending_pay'
+
+
+def test_requesting_wechat_does_not_reuse_existing_mock_payment(api, app):
+    client, seed = api['client'], api['seed']
+    with tenant_context(disabled=True):
+        payment = models.Payment(tenant_id=seed['id_a'], order_id=seed['order_a'].id,
+                                 out_trade_no='existing-mock-test', channel='mock',
+                                 amount=10, status='paying')
+        db.session.add(payment)
+        db.session.commit()
+    result = client.post('/pay/create/', headers={'token': seed['token_a']},
+                         json={'order_id': seed['order_a'].id, 'channel': 'wechat'}).get_json()
+    assert result['status'] == 409
+
+
+def test_repeated_cancel_does_not_restore_inventory_twice(api, app):
+    client, seed = api['client'], api['seed']
+    product_id = _stock_product(app, seed['id_a'], '取消库存测试', number=10)
+    order = _create_order(client, seed['token_a'], product_id, number=2)['data']
+    headers = {'token': seed['token_a']}
+    first = client.post(f'/order/{order["id"]}/cancel/', headers=headers, json={}).get_json()
+    second = client.post(f'/order/{order["id"]}/cancel/', headers=headers, json={}).get_json()
+    assert first['status'] == 200
+    assert second['status'] == 400
+    db.session.expire_all()
+    with tenant_context(disabled=True):
+        assert db.session.get(models.Product, product_id).number == 10
 
 
 # ---------- 全链路：下单 → 支付 → 状态机 ----------

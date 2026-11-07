@@ -4,14 +4,23 @@ import secrets
 import string
 
 from flask_shop.utils.rate_limit import rate_limit
-from flask import current_app, g, request
+from flask import current_app, g, make_response, request
 from flask_restful import Resource, reqparse
 
 from flask_shop import db, models
 from flask_shop.user import user_api, user_bp
 from flask_shop.utils.audit import write_audit
 from flask_shop.utils.tenant import bind_tenant, get_for_tenant, require_tenant_id, tenant_filter
-from flask_shop.utils.token import generate_token, login_required
+from flask_shop.utils.token import (
+    _extract_token,
+    authenticate_merchant,
+    clear_session_cookie,
+    generate_token,
+    login_required,
+    revoke_token,
+    set_session_cookie,
+    verify_token,
+)
 from flask_shop.utils.auth_security import (
     clear_login_failures,
     login_lock_status,
@@ -101,7 +110,9 @@ def login():
     if current_app.config.get('SMS_DEV_MODE'):
         security_tips.append('当前启用固定/开发验证码，仅限本地演示，正式环境必须关闭')
 
-    return {
+    # 云购是唯一登录签发点：登录成功同时写会话 cookie，
+    # 供 8080/8090/5174/5175 等其它端口读取同一份会话（不改动原 JSON 结构）。
+    response = make_response({
         'status': 200,
         'msg': '登录成功',
         'data': {
@@ -111,24 +122,76 @@ def login():
             'password_is_default': password_is_default,
             'security_tips': security_tips,
         },
-    }
+    })
+    set_session_cookie(response, token)
+    return response
 
 
 class Me(Resource):
     method_decorators = [login_required]
 
     def get(self):
+        from flask_shop.utils.rbac import staff_permission_payload
         return {
             'status': 200,
             'msg': 'ok',
             'data': {
                 'user': g.staff.to_dict(),
                 'tenant': g.tenant.to_dict(),
+                'permissions': staff_permission_payload(g.staff),
             },
         }
 
 
 user_api.add_resource(Me, '/me/')
+
+
+class Session(Resource):
+    """跨端口换取会话：cookie 或 Authorization 头，返回与 /me/ 同构的数据。"""
+
+    def get(self):
+        from flask_shop.utils.rbac import staff_permission_payload
+        error, status = authenticate_merchant(allow_cookie=True)
+        if error:
+            # 与其他端口的约定：无效会话返回真正的 HTTP 401
+            return error, status
+        return {
+            'status': 200,
+            'msg': 'ok',
+            'data': {
+                'user': g.staff.to_dict(),
+                'tenant': g.tenant.to_dict(),
+                'permissions': staff_permission_payload(g.staff),
+                # Other ports talk to their own backends with a Bearer token, so
+                # the session endpoint hands the same token back to the caller.
+                # It is already in the caller's own HttpOnly cookie, so this
+                # exposes nothing the browser did not already hold.
+                'token': _extract_token(allow_cookie=True),
+            },
+        }
+
+
+user_api.add_resource(Session, '/session/')
+
+
+@user_bp.route('/logout/', methods=['POST'])
+def logout():
+    """Clear the cookie and revoke the token server-side.
+
+    Clearing only the cookie would leave any already-copied token usable until it
+    expires, so the token's jti is recorded in `t_revoked_tokens` as well.
+    """
+    token = _extract_token(allow_cookie=True)
+    payload = verify_token(token) if token else None
+    revoked = False
+    if payload:
+        try:
+            revoked = revoke_token(payload)
+        except Exception:
+            current_app.logger.warning('logout 吊销 token 失败', exc_info=True)
+    response = make_response({'status': 200, 'msg': '已退出', 'revoked': revoked})
+    clear_session_cookie(response)
+    return response
 
 
 class Users(Resource):

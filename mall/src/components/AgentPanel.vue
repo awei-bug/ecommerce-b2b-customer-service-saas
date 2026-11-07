@@ -36,6 +36,7 @@
                 @click="go('/product/' + p.id + '?buy=1')"
               >立即购买</button>
             </div>
+            <div class="products-note">价格和库存以商品详情页为准</div>
           </div>
 
           <div v-if="m.needHuman" class="human">已转人工客服核对</div>
@@ -122,15 +123,19 @@ const supportSessionId = ref('')
 const lastSupportMessageId = ref(0)
 const ratingSubmitting = ref(false)
 const ratedScore = ref(null)
-const seenSupportMessages = new Set()
 let supportTimer = null
-const messages = ref([
+let historyRequest = null
+let disposed = false
+let pendingSequence = 0
+let contextVersion = 0
+const welcomeMessages = () => [
   {
     role: 'assistant',
     text: '你好，我是店里的导购客服，可以帮你：\n· 有什么货\n· 怎么付钱\n· 我的单到哪了\n· 转店长',
     agents: ['orchestrator'],
   },
-])
+]
+const messages = ref(welcomeMessages())
 const suggests = ref(['有什么货', '怎么付钱', '我的单到哪了', '转店长'])
 const placeholder = '例如：有什么货 / 怎么付钱 / 我的单到哪了'
 const supportStateText = computed(() => ({
@@ -189,16 +194,19 @@ async function send(text) {
   const t = (text ?? input.value).trim()
   if (!t || loading.value) return
   input.value = ''
-  messages.value.push({ role: 'user', text: t })
+  const pendingId = ++pendingSequence
+  const requestContext = contextVersion
+  messages.value.push({ role: 'user', text: t, pendingId })
   loading.value = true
   await scrollBottom()
   try {
     const res = await agentChat(t)
+    if (disposed || requestContext !== contextVersion || res?.stale) return
     if (!res || res.status !== 200) {
-      messages.value.push({ role: 'assistant', text: (res && res.msg) || '服务暂不可用' })
+      messages.value.push({ role: 'system', text: (res && res.msg) || '服务暂不可用，请检查会话后重试。' })
     } else {
       const d = res.data || {}
-      messages.value.push({
+      const reply = {
         role: 'assistant',
         text: d.reply || '好的',
         agents: d.agents_ran || [],
@@ -208,18 +216,34 @@ async function send(text) {
         draft: d.draft_order_hint || null,
         actions: d.actions || [],
         loginRequired: !!d.login_required,
-      })
+      }
       if (d.suggested_replies && d.suggested_replies.length) {
         suggests.value = d.suggested_replies
       }
       if (d.session_id) supportSessionId.value = d.session_id
-      if (d.support) updateSupportState(d.support)
+      if (d.customer_message_id) {
+        messages.value = messages.value.filter((item) => item.pendingId !== pendingId)
+        mergeSupportMessage({ id: d.customer_message_id, sender_type: 'customer', content: t })
+      }
+      if (d.ai_message_id) {
+        mergeSupportMessage({ id: d.ai_message_id, sender_type: 'ai', content: reply.text }, reply)
+      } else if (!d.customer_message_id) {
+        messages.value.push(reply)
+      }
+      if (d.session_id) {
+        if (historyRequest) await historyRequest.catch(() => {})
+        await pollSupportMessages()
+      }
+      else if (d.support) updateSupportState(d.support)
     }
   } catch (e) {
-    messages.value.push({ role: 'assistant', text: e.message || '网络错误' })
+    if (disposed || requestContext !== contextVersion) return
+    messages.value.push({ role: 'system', text: '连接中断，消息是否送达尚未确认，请检查会话后再重试。' })
   } finally {
-    loading.value = false
-    await scrollBottom()
+    if (!disposed && requestContext === contextVersion) {
+      loading.value = false
+      await scrollBottom()
+    }
   }
 }
 
@@ -244,62 +268,113 @@ function stopSupportPolling() {
 
 async function pollSupportMessages() {
   if (!supportSessionId.value) return
+  if (historyRequest) {
+    try { await historyRequest } catch (_) {}
+    return
+  }
+  const sessionId = supportSessionId.value
+  const request = syncSupportMessages(sessionId, contextVersion)
+  historyRequest = request
   try {
-    const response = await getSupportMessages(supportSessionId.value, lastSupportMessageId.value)
-    if (response?.status !== 200) return
-    const data = response.data || {}
-    for (const item of data.messages || []) {
-      lastSupportMessageId.value = Math.max(lastSupportMessageId.value, Number(item.id) || 0)
-      if (!['staff', 'system'].includes(item.sender_type) || seenSupportMessages.has(item.id)) continue
-      seenSupportMessages.add(item.id)
-      messages.value.push({ role: item.sender_type, text: item.content })
-    }
-    updateSupportState(data.conversation)
-    await scrollBottom()
+    await request
   } catch (_) {
     // 轮询失败不打断顾客输入，下一轮会自动重试。
+  } finally {
+    if (historyRequest === request) historyRequest = null
   }
 }
 
-async function loadConversationHistory() {
-  if (!supportSessionId.value) return
-  try {
-    const response = await getSupportMessages(supportSessionId.value, 0)
-    if (response?.status !== 200) return
+function mergeSupportMessage(item, details = {}) {
+  const id = Number(item.id)
+  if (!id) return
+  const extra = item.extra || {}
+  const replay = item.sender_type === 'ai' && Array.isArray(extra.products) ? {
+    products: extra.products,
+    draft: extra.draft_order_hint || null,
+    actions: extra.actions || [],
+    loginRequired: !!extra.login_required,
+    agents: extra.agents_ran || [],
+    needHuman: !!extra.need_human,
+    replayFresh: true,
+  } : {}
+  const existing = messages.value.find((message) => message.id === id)
+  if (existing) {
+    const current = existing.replayFresh && !replay.replayFresh ? {
+      products: existing.products,
+      draft: existing.draft,
+      actions: existing.actions,
+      loginRequired: existing.loginRequired,
+    } : {}
+    Object.assign(existing, details, replay, current)
+    return
+  }
+  const message = {
+    id,
+    role: item.sender_type === 'customer' ? 'user' : item.sender_type === 'ai' ? 'assistant' : item.sender_type,
+    text: item.content,
+    citations: item.extra?.citations || [],
+    ...details,
+    ...replay,
+  }
+  const next = messages.value.findIndex((entry) => entry.id && entry.id > id)
+  if (next < 0) {
+    const pending = messages.value.findIndex((entry) => entry.pendingId)
+    if (pending < 0) messages.value.push(message)
+    else messages.value.splice(pending, 0, message)
+  } else messages.value.splice(next, 0, message)
+}
+
+async function syncSupportMessages(sessionId, requestContext) {
+  let more = true
+  while (more && !disposed && requestContext === contextVersion && supportSessionId.value === sessionId) {
+    const response = await getSupportMessages(sessionId, lastSupportMessageId.value)
+    if (disposed || requestContext !== contextVersion || supportSessionId.value !== sessionId || response?.status !== 200) return
     const data = response.data || {}
     const items = data.messages || []
-    if (items.length) {
-      messages.value = items.map((item) => ({
-        role: item.sender_type === 'customer' ? 'user' : item.sender_type,
-        text: item.content,
-        citations: item.extra?.citations || [],
-      }))
-      for (const item of items) {
-        seenSupportMessages.add(item.id)
-        lastSupportMessageId.value = Math.max(lastSupportMessageId.value, Number(item.id) || 0)
-      }
+    for (const item of items) {
+      mergeSupportMessage(item)
+      lastSupportMessageId.value = Math.max(lastSupportMessageId.value, Number(item.id) || 0)
     }
     updateSupportState(data.conversation)
-    await scrollBottom()
-  } catch (_) {
-    // 匿名会话可能尚未落库，保持欢迎语即可。
+    more = !!data.has_more && items.length > 0
   }
+  await scrollBottom()
 }
 
 async function submitRating(score) {
   if (!supportSessionId.value || ratingSubmitting.value || ratedScore.value) return
+  const requestContext = contextVersion
   ratingSubmitting.value = true
   try {
     const response = await rateSupportSession(supportSessionId.value, score)
+    if (disposed || requestContext !== contextVersion) return
     if (response?.status !== 200) throw new Error(response?.msg || '评价提交失败')
     ratedScore.value = score
     updateSupportState(response.data)
   } catch (error) {
+    if (disposed || requestContext !== contextVersion) return
     messages.value.push({ role: 'system', text: error.message || '评价提交失败，请稍后重试' })
   } finally {
-    ratingSubmitting.value = false
-    await scrollBottom()
+    if (!disposed && requestContext === contextVersion) {
+      ratingSubmitting.value = false
+      await scrollBottom()
+    }
   }
+}
+
+function resetConversationContext() {
+  contextVersion += 1
+  stopSupportPolling()
+  historyRequest = null
+  supportState.value = null
+  lastSupportMessageId.value = 0
+  ratedScore.value = null
+  ratingSubmitting.value = false
+  loading.value = false
+  input.value = ''
+  messages.value = welcomeMessages()
+  try { supportSessionId.value = localStorage.getItem('agent_session_id') || '' } catch (_) { supportSessionId.value = '' }
+  if (supportSessionId.value) pollSupportMessages()
 }
 
 async function scrollBottom() {
@@ -308,12 +383,17 @@ async function scrollBottom() {
 }
 
 onMounted(() => {
+  window.addEventListener('mall:auth-change', resetConversationContext)
   loadShop()
   try { supportSessionId.value = localStorage.getItem('agent_session_id') || '' } catch (_) {}
-  if (supportSessionId.value) loadConversationHistory()
+  if (supportSessionId.value) pollSupportMessages()
 })
 
-onBeforeUnmount(stopSupportPolling)
+onBeforeUnmount(() => {
+  disposed = true
+  stopSupportPolling()
+  window.removeEventListener('mall:auth-change', resetConversationContext)
+})
 </script>
 
 <style scoped>
@@ -405,6 +485,7 @@ onBeforeUnmount(stopSupportPolling)
 .rating-buttons button:hover:not(:disabled), .rating-buttons button.selected { border-color: #0f766e; background: #0f766e; color: #fff; }
 .rating-buttons button:disabled { cursor: default; opacity: .72; }
 .products { display: grid; gap: 8px; margin-top: 10px; }
+.products-note { font-size: 12px; color: #57534e; }
 .p-card {
   border: 1px solid #e5e7eb;
   background: #fff;

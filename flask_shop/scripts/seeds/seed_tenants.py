@@ -10,9 +10,7 @@
   - 仅 db.create_all()（不删表）
   - 若 demo-a / demo-b 已存在则跳过并提示
 
-危险操作（会清空当前库全部表）需显式确认：
-  python scripts/seeds/seed_tenants.py --reset
-  且环境变量 ALLOW_DB_RESET=1
+不支持整库重置；需要全新演示数据时请使用独立空库。
 """
 import argparse
 import os
@@ -24,7 +22,11 @@ if ROOT not in sys.path:
 
 # 不依赖 manager.py（避免本机未装 flask_migrate 时无法跑种子）
 from flask_shop import create_app, db, models  # noqa: E402
+from flask_shop.utils.demo_seed import reject_production_demo_seed  # noqa: E402
 
+reject_production_demo_seed()
+if '--reset' in sys.argv:
+    raise SystemExit('已禁用整库重置；请使用独立的空演示数据库。')
 app = create_app('develop')
 
 
@@ -72,7 +74,8 @@ def ensure_menus():
 def seed_tenant(slug, name, admin_name, product_name, product_price, address, phone, email):
     tenant = models.Tenant.query.filter_by(slug=slug).first()
     if tenant:
-        tenant.data_mode = 'demo'
+        if tenant.data_mode != 'demo':
+            raise RuntimeError(f'拒绝修改非演示模式的店铺 {slug}')
         print(f'   skip tenant {slug} (already exists, id={tenant.id})')
         return tenant, False
 
@@ -130,12 +133,7 @@ def seed_tenant(slug, name, admin_name, product_name, product_price, address, ph
 def seed(reset=False):
     with app.app_context():
         if reset:
-            if os.getenv('ALLOW_DB_RESET') != '1':
-                print('拒绝执行 drop_all：请设置环境变量 ALLOW_DB_RESET=1 后再加 --reset')
-                print('示例：ALLOW_DB_RESET=1 python scripts/seeds/seed_tenants.py --reset')
-                sys.exit(1)
-            print('>> DROP ALL TABLES (ALLOW_DB_RESET=1) ...')
-            db.drop_all()
+            raise RuntimeError('已禁用整库重置；请使用独立的空演示数据库。')
 
         print('>> create_all ...')
         db.create_all()
@@ -174,7 +172,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--reset',
         action='store_true',
-        help='危险：删除当前库全部表后重建（还需 ALLOW_DB_RESET=1）',
+        help='已禁用；请使用独立空库',
     )
     args = parser.parse_args()
     seed(reset=args.reset)

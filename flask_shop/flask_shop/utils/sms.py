@@ -11,19 +11,24 @@ C 端短信验证码
   - 生成随机码，调用配置的短信通道发送
   - 响应不回传验证码
 """
-import random
+import hashlib
 import re
+import secrets
 from datetime import datetime, timedelta
 
-from flask import current_app
+from flask import current_app, request
+from sqlalchemy import case, or_, update
+from sqlalchemy.exc import IntegrityError
 
 from flask_shop import db, models
 
-PHONE_RE = re.compile(r'^1[3-9]\d{9}$')
+PHONE_RE = re.compile(r'^1[3-9][0-9]{9}$')
+SMS_LOCKED_MESSAGE = '验证码尝试次数过多，请稍后再试'
+SMS_SEND_LIMIT_MESSAGE = '短信发送过于频繁，请稍后再试'
 
 
 def normalize_phone(phone):
-    phone = (phone or '').strip()
+    phone = phone.strip() if isinstance(phone, str) else ''
     if not PHONE_RE.match(phone):
         return None
     return phone
@@ -38,6 +43,33 @@ def _cooldown_seconds():
     if is_dev_mode():
         return int(current_app.config.get('SMS_DEV_COOLDOWN', 10))
     return int(current_app.config.get('SMS_COOLDOWN', 60))
+
+
+def _ensure_throttle(scope, key):
+    try:
+        with db.session.begin_nested():
+            db.session.add(models.LoginThrottle(scope=scope, key_hash=key, failed_count=0))
+            db.session.flush()
+    except IntegrityError:
+        pass
+
+
+def _reserve_send_slot(scope, value, limit, seconds, now):
+    key = hashlib.sha256(value.encode('utf-8')).hexdigest()
+    _ensure_throttle(scope, key)
+    cutoff = now - timedelta(seconds=seconds)
+    expired = or_(models.LoginThrottle.first_failed_at.is_(None),
+                  models.LoginThrottle.first_failed_at <= cutoff)
+    result = db.session.execute(update(models.LoginThrottle).where(
+        models.LoginThrottle.scope == scope,
+        models.LoginThrottle.key_hash == key,
+        or_(expired, models.LoginThrottle.failed_count < limit),
+    ).values(
+        failed_count=case((expired, 1), else_=models.LoginThrottle.failed_count + 1),
+        first_failed_at=case((expired, now), else_=models.LoginThrottle.first_failed_at),
+        last_failed_at=now,
+    ))
+    return result.rowcount == 1
 
 
 def send_login_code(tenant_id, phone):
@@ -61,7 +93,7 @@ def send_login_code(tenant_id, phone):
 
     # 冷却期内：开发模式直接回显同一条未使用验证码，避免「发不出去」的假失败
     if recent and not recent.used:
-        if is_dev_mode():
+        if is_dev_mode() and recent.expires_at and recent.expires_at > datetime.now():
             left = cooldown
             if recent.create_time:
                 elapsed = (datetime.now() - recent.create_time).total_seconds()
@@ -72,9 +104,19 @@ def send_login_code(tenant_id, phone):
                 'dev_mode': True,
                 'reused': True,
             }, None
-        return None, f'发送过于频繁，请 {cooldown} 秒后再试'
+        return None, SMS_SEND_LIMIT_MESSAGE
 
-    code = f'{random.randint(0, 999999):06d}'
+    now = datetime.now()
+    ip_limit = int(current_app.config.get('SMS_SEND_IP_LIMIT', 10))
+    ip_window = int(current_app.config.get('SMS_SEND_IP_WINDOW_SECONDS', 60))
+    if not _reserve_send_slot('sms_send_phone', phone, 1, cooldown, now) or not _reserve_send_slot(
+        'sms_send_ip', request.remote_addr or 'unknown', ip_limit, ip_window, now,
+    ):
+        db.session.rollback()
+        return None, SMS_SEND_LIMIT_MESSAGE
+    db.session.commit()
+
+    code = f'{secrets.randbelow(1000000):06d}'
 
     if not is_dev_mode():
         ok, err = _send_via_provider(phone, code)
@@ -171,30 +213,76 @@ def _send_via_provider(phone, code):
     return False, f'未实现的短信通道 SMS_PROVIDER={provider}，可用 console/http 或 SMS_DEV_MODE=1'
 
 
+def _reserve_login_attempt(tenant_id, phone, now):
+    key = hashlib.sha256(f'{tenant_id}:{phone}'.encode('utf-8')).hexdigest()
+    scope = 'sms_account'
+    _ensure_throttle(scope, key)
+
+    limit = int(current_app.config.get('SMS_LOGIN_ATTEMPT_LIMIT', 5))
+    lock_minutes = int(current_app.config.get('SMS_LOGIN_LOCK_MINUTES', 15))
+    cutoff = now - timedelta(minutes=lock_minutes)
+    reset = or_(models.LoginThrottle.last_failed_at.is_(None),
+                models.LoginThrottle.last_failed_at <= cutoff,
+                models.LoginThrottle.locked_until <= now)
+    next_count = case((reset, 1), else_=models.LoginThrottle.failed_count + 1)
+    result = db.session.execute(update(models.LoginThrottle).where(
+        models.LoginThrottle.scope == scope,
+        models.LoginThrottle.key_hash == key,
+        or_(models.LoginThrottle.locked_until.is_(None), models.LoginThrottle.locked_until <= now),
+    ).values(
+        failed_count=next_count,
+        first_failed_at=case((reset, now), else_=models.LoginThrottle.first_failed_at),
+        last_failed_at=now,
+        locked_until=None,
+    ))
+    if result.rowcount != 1:
+        return None
+    db.session.execute(update(models.LoginThrottle).where(
+        models.LoginThrottle.scope == scope,
+        models.LoginThrottle.key_hash == key,
+        models.LoginThrottle.failed_count >= limit,
+    ).values(locked_until=now + timedelta(minutes=lock_minutes)))
+    return key
+
+
 def verify_login_code(tenant_id, phone, code):
-    """校验成功返回 True，并标记 used。必须匹配数据库中的有效验证码。"""
+    """限制每个店铺手机号的尝试，并原子消费最新验证码。"""
     phone = normalize_phone(phone)
-    code = (code or '').strip()
-    if not phone or not code:
+    code = code.strip() if isinstance(code, str) else ''
+    if not phone:
         return False, '手机号或验证码不能为空'
-    if not re.fullmatch(r'\d{4,8}', code):
-        return False, '验证码格式不正确'
+
+    now = datetime.now()
+    key = _reserve_login_attempt(tenant_id, phone, now)
+    if not key:
+        db.session.rollback()
+        return False, SMS_LOCKED_MESSAGE
 
     row = (
         models.SmsCode.query.filter(
             models.SmsCode.tenant_id == tenant_id,
             models.SmsCode.phone == phone,
             models.SmsCode.scene == 'login',
-            models.SmsCode.used == 0,
-            models.SmsCode.code == code,
         )
         .order_by(models.SmsCode.id.desc())
         .first()
     )
-    if not row:
-        return False, '验证码错误，请先获取验证码'
-    if row.expires_at and row.expires_at < datetime.now():
-        return False, '验证码已过期，请重新获取'
-    row.used = 1
+    valid_format = bool(re.fullmatch(r'[0-9]{6}', code))
+    consumed = None
+    if row and valid_format:
+        consumed = db.session.execute(update(models.SmsCode).where(
+            models.SmsCode.id == row.id,
+            models.SmsCode.tenant_id == tenant_id,
+            models.SmsCode.phone == phone,
+            models.SmsCode.used == 0,
+            models.SmsCode.expires_at > datetime.now(),
+            models.SmsCode.code == code,
+        ).values(used=1))
+    if not consumed or consumed.rowcount != 1:
+        db.session.commit()
+        return False, '验证码错误或已失效，请重新获取'
+    db.session.execute(update(models.LoginThrottle).where(
+        models.LoginThrottle.scope == 'sms_account', models.LoginThrottle.key_hash == key,
+    ).values(failed_count=0, first_failed_at=None, last_failed_at=None, locked_until=None))
     db.session.commit()
     return True, None

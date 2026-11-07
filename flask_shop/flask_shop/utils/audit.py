@@ -1,5 +1,7 @@
 """操作审计写入工具。"""
-from flask import g, request
+from flask import current_app, g, request
+from sqlalchemy import insert
+from sqlalchemy.pool import SingletonThreadPool, StaticPool
 
 from flask_shop import db, models
 
@@ -9,9 +11,8 @@ def write_audit(action, resource_type=None, resource_id=None, detail=None, tenan
     """
     写入审计日志。失败不抛到业务主流程（best-effort）。
 
-    实现要点：
-    - 优先用 SAVEPOINT，避免审计失败 rollback 掉尚未 commit 的业务改动
-    - 若处于无外层事务场景，则独立 commit
+    审计使用独立数据库事务，不提交或回滚调用方会话。
+    调用方应在业务提交后调用，审计失败不影响业务结果。
     """
     try:
         tid = tenant_id if tenant_id is not None else getattr(g, 'tenant_id', None)
@@ -29,15 +30,13 @@ def write_audit(action, resource_type=None, resource_id=None, detail=None, tenan
                 aid = None
         ip = None
         try:
-            ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-            if ip and ',' in ip:
-                ip = ip.split(',')[0].strip()
+            ip = request.remote_addr
         except Exception:
             ip = None
         if ip:
             ip = str(ip)[:64]
 
-        row = models.AuditLog(
+        values = dict(
             tenant_id=tid,
             actor_type=atype,
             actor_id=aid,
@@ -48,31 +47,12 @@ def write_audit(action, resource_type=None, resource_id=None, detail=None, tenan
             ip=ip,
         )
 
-        # 有活跃事务时用嵌套保存点，避免失败污染外层
-        try:
-            in_tx = db.session().in_transaction() if callable(getattr(db, 'session', None)) else db.session.in_transaction()
-        except Exception:
-            try:
-                in_tx = bool(db.session.dirty or db.session.new or db.session.deleted)
-            except Exception:
-                in_tx = False
-
-        # Flask-SQLAlchemy: session.in_transaction() available on Session
-        try:
-            sess = db.session
-            if hasattr(sess, 'in_transaction') and sess.in_transaction():
-                with sess.begin_nested():
-                    sess.add(row)
-            else:
-                sess.add(row)
-                sess.commit()
-        except Exception:
-            # 回退：尽力写入
-            db.session.add(row)
-            db.session.commit()
+        engine = db.engines.get('_audit', db.engine)
+        if isinstance(engine.pool, (StaticPool, SingletonThreadPool)):
+            raise RuntimeError('cannot isolate audit transaction with a single-connection pool')
+        with engine.begin() as connection:
+            connection.execute(insert(models.AuditLog).values(**values))
+        return True
     except Exception as e:
-        try:
-            db.session.rollback()
-        except Exception:
-            pass
-        print('audit write failed:', e)
+        current_app.logger.error('audit write failed action=%s error_type=%s', action, type(e).__name__)
+        return False

@@ -65,6 +65,10 @@ export function claimPaid(id, data) {
   return http.post(`/order/${id}/claim-paid/`, data)
 }
 
+export function getPayProof(id) {
+  return http.get(`/order/${id}/pay-proof/`, { responseType: 'blob' })
+}
+
 export function createPayment(data) {
   return http.post('/pay/create/', data)
 }
@@ -101,12 +105,14 @@ export async function payExistingOrder() {
 
 /** 多智能体导购（/api/agents，不在 /api/c 下） */
 export async function agentChat(text, extra = {}) {
-  const { getTenantSlug, getToken } = await import('@/utils/session')
+  const { getTenantSlug, getToken, getAuthVersion } = await import('@/utils/session')
+  const tenant = getTenantSlug()
+  const token = getToken()
+  const authVersion = getAuthVersion()
   const headers = {
     'Content-Type': 'application/json',
-    'X-Tenant-Slug': getTenantSlug(),
+    'X-Tenant-Slug': tenant,
   }
-  const token = getToken()
   if (token) headers.token = token
   let session_id = extra.session_id
   try {
@@ -119,6 +125,10 @@ export async function agentChat(text, extra = {}) {
   })
   const data = await res.json()
   try {
+    if (getAuthVersion() !== authVersion || getTenantSlug() !== tenant || getToken() !== token ||
+        (localStorage.getItem('agent_session_id') || '') !== session_id) {
+      return { stale: true }
+    }
     const sid = data?.data?.session_id
     if (sid) localStorage.setItem('agent_session_id', sid)
   } catch (_) {}

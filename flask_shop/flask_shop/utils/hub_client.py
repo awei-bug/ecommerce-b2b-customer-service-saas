@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode
 
 import requests
 from flask import current_app
@@ -75,16 +76,19 @@ def health() -> dict:
     return _request("GET", "/health", timeout=5)
 
 
-def fetch_products(status: str = "", since: str = "", limit: int = 50) -> List[dict]:
+def fetch_products(status: str = "", since: str = "", limit: int = 50, offset: int = 0) -> List[dict]:
     """拉取数据中心商品。since 为 ISO 时间串，用于增量同步。"""
     cfg = _config()
-    params = f"tenant={cfg['slug']}&limit={int(limit)}"
+    params = {"tenant": cfg['slug'], "limit": int(limit), "offset": int(offset)}
     if status:
-        params += f"&status={status}"
+        params['status'] = status
     if since:
-        params += f"&since={since}"
-    payload = _request("GET", f"/hub/products?{params}")
-    return payload.get("items") or []
+        params['since'] = since
+    payload = _request("GET", f"/hub/products?{urlencode(params)}")
+    items = payload.get("items")
+    if payload.get("ok") is not True or not isinstance(items, list):
+        raise HubError("数据中心商品列表返回无效")
+    return items
 
 
 def fetch_product(external_id: str) -> Optional[dict]:

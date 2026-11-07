@@ -1,13 +1,14 @@
 # run inside shop_api container
 import os, sys, json
 sys.path.insert(0, "/app")
-os.environ.setdefault("FLASK_CONFIG", os.getenv("FLASK_CONFIG") or "sample")
-
 from flask_shop import create_app, db, models
+from flask_shop.utils.demo_seed import reject_production_demo_seed
 from flask_shop.utils.tenant_query import tenant_context
 from flask_shop.utils.rbac import ROLE_TEMPLATES, ALL_ACTION_CODES
 import json as _json
 
+reject_production_demo_seed()
+os.environ.setdefault("FLASK_CONFIG", "sample")
 app = create_app(os.environ["FLASK_CONFIG"])
 
 DEFAULT_PAY = (
@@ -76,11 +77,14 @@ def main():
                 all_menus.append(m)
 
             t = models.Tenant.query.filter_by(slug="demo").first()
+            if t and t.data_mode != "demo":
+                raise RuntimeError("拒绝修改非演示模式的 demo 店铺")
             if not t:
                 t = models.Tenant(
                     name="云购演示旗舰店",
                     slug="demo",
                     status=1,
+                    data_mode="demo",
                     plan_code="pro",
                     contact_phone="400-800-1234",
                     pay_guide=DEFAULT_PAY,
@@ -117,8 +121,7 @@ def main():
             else:
                 admin.role_id = role.id
                 admin.is_admin = 1
-                admin.password = "123456"
-                print("~ admin reset 123456")
+                print("~ existing admin password unchanged")
 
             cats = {}
             for cname in ["数码家电", "服饰鞋包", "食品生鲜", "家居生活"]:

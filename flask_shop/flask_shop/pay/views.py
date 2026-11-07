@@ -82,6 +82,7 @@ def channel_status():
             'allow_mock_pay': bool(current_app.config.get('ALLOW_MOCK_PAY')),
             'wechat': {
                 'configured': ok,
+                'available': ok and wx.production_ready(),
                 'missing': missing,
                 'trade_type': current_app.config.get('WECHAT_PAY_TRADE_TYPE'),
                 'mch_id_set': bool(current_app.config.get('WECHAT_MCH_ID')),
@@ -114,6 +115,11 @@ def create_payment():
     if order.status != PENDING_PAY:
         return {'status': 400, 'msg': f'仅待支付订单可发起支付，当前：{order.status}'}
 
+    try:
+        channel = get_channel(channel_name)
+    except PayChannelError as e:
+        return {'status': e.code, 'msg': e.message}
+
     existing = (
         models.Payment.query.filter(
             models.Payment.tenant_id == order.tenant_id,
@@ -124,13 +130,14 @@ def create_payment():
         .first()
     )
     if existing:
+        if existing.channel != channel.name:
+            return {'status': 409, 'msg': '订单已有其他渠道的待支付单，请先核对'}
         try:
-            channel = get_channel(existing.channel or channel_name)
             prepay = channel.prepay(
                 existing, order,
                 openid=body.get('openid'),
                 trade_type=body.get('trade_type'),
-                client_ip=request.headers.get('X-Forwarded-For', request.remote_addr),
+                client_ip=request.remote_addr,
             )
         except PayChannelError as e:
             return {'status': e.code, 'msg': e.message}
@@ -143,11 +150,6 @@ def create_payment():
                 'prepay': prepay,
             }
         }
-
-    try:
-        channel = get_channel(channel_name)
-    except PayChannelError as e:
-        return {'status': e.code, 'msg': e.message}
 
     payment = models.Payment(
         tenant_id=require_tenant_id(),
@@ -165,7 +167,7 @@ def create_payment():
             payment, order,
             openid=body.get('openid'),
             trade_type=body.get('trade_type'),
-            client_ip=request.headers.get('X-Forwarded-For', request.remote_addr),
+            client_ip=request.remote_addr,
         )
     except PayChannelError as e:
         db.session.rollback()
@@ -206,6 +208,9 @@ def mock_notify():
     if not payment:
         return {'status': 404, 'msg': '支付单不存在'}
 
+    if payment.channel != 'mock':
+        return {'status': 400, 'msg': '非模拟支付单不可使用模拟回调'}
+
     if result == 'fail':
         if payment.status == 'success':
             return {'status': 400, 'msg': '已支付成功，不能改为失败'}
@@ -237,6 +242,8 @@ def wechat_notify():
     微信支付结果通知（无需商户 JWT；必须验签解密）。
     成功必须返回 HTTP 200 + JSON {code:SUCCESS}，否则微信会重试。
     """
+    if not WechatChannel.production_ready():
+        return {'code': 'FAIL', 'message': '微信支付暂未完成安全验收'}, 503
     from flask_shop.utils.audit import write_audit
 
     raw = request.get_data(as_text=True)
@@ -309,6 +316,9 @@ def wechat_query(out_trade_no):
     from flask_shop.utils.rbac import staff_has_permission
     if not staff_has_permission('order:read'):
         return {'status': 403, 'msg': '无权限'}
+
+    if not WechatChannel.production_ready():
+        return {'status': 503, 'msg': '微信支付暂未完成安全验收，请人工核对存量交易'}
 
     tenant_id = require_tenant_id()
     payment = models.Payment.query.filter_by(

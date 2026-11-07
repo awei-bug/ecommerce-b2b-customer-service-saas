@@ -13,7 +13,9 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from flask_shop import create_app, db, models  # noqa: E402
+from flask_shop.utils.demo_seed import reject_production_demo_seed  # noqa: E402
 
+reject_production_demo_seed()
 app = create_app('develop')
 
 # 演示账号统一重置
@@ -23,7 +25,8 @@ NEW_PWD = '123456'
 
 def main():
     with app.app_context():
-        users = models.User.query.filter(models.User.name.in_(DEMO_NAMES)).all()
+        users = (models.User.query.join(models.Tenant, models.User.tenant_id == models.Tenant.id)
+                 .filter(models.Tenant.data_mode == 'demo', models.User.name.in_(DEMO_NAMES)).all())
         if not users:
             print('no demo users found')
             return

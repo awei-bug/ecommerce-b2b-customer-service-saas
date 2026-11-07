@@ -7,12 +7,14 @@ SQLAlchemy==2.0.36
 greenlet==3.1.1
 PyJWT==2.6.0
 PyMySQL==1.1.1
+psycopg[binary]==3.2.13
 python-dotenv==1.0.1
 Jinja2==3.1.4
 MarkupSafe==2.1.5
 itsdangerous==2.1.2
 click==8.1.7
 openpyxl==3.1.5
+Pillow==13.0.0
 # 应用运行期依赖（此前漏声明，全新部署会缺）：
 #   requests     -> utils/hub_client.py 模块级 import，数据中心回源与商品同步用
 #   wechatpayv3  -> utils/pay_channel.py 懒加载，微信支付 v3 直连商户下单用

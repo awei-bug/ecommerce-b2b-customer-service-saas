@@ -91,6 +91,10 @@ class WechatChannel(BaseChannel):
     """
     name = 'wechat'
 
+    @staticmethod
+    def production_ready():
+        return False
+
     def _cfg(self):
         c = current_app.config
         return {
@@ -161,6 +165,8 @@ class WechatChannel(BaseChannel):
         return client, tt, cfg
 
     def prepay(self, payment, order, **kwargs):
+        if not self.production_ready():
+            raise PayChannelError('微信支付暂未完成安全验收，不能发起收款', 503)
         amount_fen = int(round(float(payment.amount or 0) * 100))
         if amount_fen <= 0:
             raise PayChannelError('支付金额必须大于 0')

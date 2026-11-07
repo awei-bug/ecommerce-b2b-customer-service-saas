@@ -4,10 +4,10 @@
     <header class="page-head">
       <div>
         <div class="title-line">
-          <h1>AI 自动上架</h1>
+          <h1>内容中心</h1>
           <span class="live-badge"><i></i>商品数据已连接</span>
         </div>
-        <p>自动生成商品内容与主图，保存后直接同步到商城前台。</p>
+        <p>为本店商品生成内容与主图，保存结果并管理上架。</p>
       </div>
       <div class="head-actions">
         <el-button :icon="Refresh" :loading="loading" @click="loadCreativeWorkspace">刷新商品</el-button>
@@ -198,7 +198,8 @@
     </section>
 
     <section v-else class="workspace creative-workspace">
-      <section class="auto-listing-panel">
+      <el-alert v-if="!isDemoTenant" title="正式店铺暂不开放批量自动上架，请在高级模式中逐个确认素材后保存。" type="warning" :closable="false" show-icon />
+      <section v-if="isDemoTenant" class="auto-listing-panel">
         <div class="auto-listing-copy">
           <div class="auto-listing-title"><el-icon><VideoPlay /></el-icon><h3>一键自动上架</h3><el-tag v-if="creativeAutoRun" :type="autoRunTone" effect="plain">{{ autoRunLabel }}</el-tag></div>
           <p>点击开始后，系统会依次生成内容、主图、保存资源并上架；运行中可以随时结束。</p>
@@ -214,7 +215,7 @@
       </section>
       <details class="advanced-tools">
         <summary>高级模式：指定商品、渠道与图片质检</summary>
-        <div class="advanced-scope">
+        <div v-if="isDemoTenant" class="advanced-scope">
           <span>自动处理范围</span>
           <el-select v-model="creativeAutoScope" size="small" :disabled="!!creativeAutoRun && ['running', 'stopping'].includes(creativeAutoRun.status)" style="width:190px"><el-option v-if="isDemoTenant" label="自动创建新商品（演示）" value="create_new" /><el-option label="仅处理缺主图" value="missing_image" /><el-option label="处理全部商品" value="all_products" /></el-select>
         </div>
@@ -247,9 +248,9 @@
           <template v-if="creativeKit">
             <div class="output-head"><div><span>生成结果</span><h3>{{ creativeKit.title }}</h3></div><el-tag :type="creativeKit.status === 'ready' ? 'success' : 'warning'" effect="plain">{{ creativeKit.status === 'ready' ? '可交付' : '需补源素材' }}</el-tag></div>
             <div class="brief-block"><strong>主图 Brief</strong><p>{{ creativeKit.main_image_brief }}</p></div>
-            <div v-if="creativeKit.image?.url" class="generated-media">
+            <div v-if="creativeImageSource" class="generated-media">
               <strong>Agnes 生成主图</strong>
-              <el-image :src="creativeKit.image.url" fit="contain" :preview-src-list="[creativeKit.image.url]" class="generated-image" />
+              <el-image :src="creativeImageSource" fit="contain" :preview-src-list="[creativeImageSource]" class="generated-image" />
               <small>{{ creativeKit.image.model }}</small>
               <div class="creative-apply-bar">
                 <el-switch v-model="creativePublish" active-text="确认后同步上架" />
@@ -323,11 +324,18 @@ const savingCompetitor = ref(false)
 const creativeLoading = ref(false)
 const inspectLoading = ref(false)
 const creativeKit = ref(null)
+const creativeImageSource = computed(() => {
+  const encoded = creativeKit.value?.image?.b64_json || ''
+  if (!encoded) return ''
+  if (encoded.startsWith('data:image/')) return encoded
+  const format = encoded.startsWith('/9j/') ? 'jpeg' : encoded.startsWith('R0lGOD') ? 'gif' : encoded.startsWith('UklGR') ? 'webp' : 'png'
+  return `data:image/${format};base64,${encoded}`
+})
 const creativePublish = ref(false)
 const creativeApplying = ref(false)
 const creativeAutoRun = ref(null)
 const tenant = JSON.parse(sessionStorage.getItem('tenant') || 'null') || {}
-const isDemoTenant = tenant.data_mode === 'demo' || tenant.slug === 'demo'
+const isDemoTenant = tenant.data_mode === 'demo'
 const creativeAutoScope = ref(isDemoTenant ? 'create_new' : 'missing_image')
 const creativeAutoStarting = ref(false)
 const creativeAutoStopping = ref(false)
@@ -430,7 +438,7 @@ function openModule(code) {
   else if (['competitor', 'aftersale'].includes(code)) { activeTab.value = 'market'; marketMode.value = code === 'competitor' ? 'competitor' : 'aftersale' }
   else if (code === 'creative') activeTab.value = 'creative'
   else if (code === 'listing') router.push('/product_list')
-  else if (code === 'service') router.push('/agent_ops')
+  else if (code === 'service') router.push({ path: '/operations_center', query: { tab: 'assistant' } })
   else activeTab.value = 'cockpit'
 }
 function routeInsight(action) {
@@ -538,7 +546,7 @@ async function pollCreativeAuto() {
     creativeAutoRun.value = res.data.data
     if (!['running', 'stopping'].includes(creativeAutoRun.value.status)) {
       stopCreativeAutoTimer()
-      await Promise.all([loadProducts(), loadOverview()])
+      await loadProducts()
       ElMessage.success(creativeAutoRun.value.summary || '自动上架任务结束')
     }
   } catch (error) {

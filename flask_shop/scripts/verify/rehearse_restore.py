@@ -10,8 +10,8 @@ backup_mysql_local.py 和 restore_mysql_local.py，但没有任何东西把两�
 只恢复到临时库然后打印表数是不够的——那只能证明 SQL 跑完了，不能证明数据还在。
 本脚本做三件事：
 
-1. **备份**：调 backup 脚本打一份当前库的逻辑备份；
-2. **恢复**：把该备份恢复到独立临时库（`flask_shop_restore`），不碰正式库；
+1. **选备份**：选择现有的可信逻辑备份；
+2. **恢复**：把备份恢复到新建的随机临时库；
 3. **核对**：逐表比对源库与恢复库的行数，并额外抽查业务关键表的数据完整性
    （金额非负、租户可枚举、订单状态合法）。任一张表行数不一致或抽查失败，
    演练即失败。
@@ -26,7 +26,7 @@ backup_mysql_local.py 和 restore_mysql_local.py，但没有任何东西把两�
 
 设计取舍
 --------
-- **只读源库 + 只写临时库**：正式库全程不执行任何写操作。误跑不会影响生产。
+- SQL 备份可包含跨库操作，只能在隔离的 MySQL 实例中执行可信备份。
 - 不做备份文件的语法级修复：如果备份本身残缺，演练必须失败——掩盖问题的演练
   比不演练更危险。
 - 抽样而非全量比对：数据量大时全量对比不现实。抽的是业务关键表 + 金额/状态合法
@@ -38,12 +38,13 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 import pymysql
+from sqlalchemy.engine import make_url
 
 # 脚本位于 flask_shop/scripts/verify/，因此 flask_shop 根是上三级。
 FLASK_SHOP_ROOT = Path(__file__).resolve().parents[2]
@@ -55,7 +56,6 @@ for _path in (FLASK_SHOP_ROOT,):
 
 from config import config_map  # noqa: E402
 
-BACKUP_SCRIPT = REPO_ROOT.parent / "deploy" / "win" / "backup_mysql_local.py"
 BACKUP_DIR = REPO_ROOT.parent / "deploy" / "backups"
 
 # 业务关键表：除行数外还要抽查数据合法性。
@@ -70,39 +70,26 @@ def check(name: str, ok: bool, detail: str = "") -> bool:
     return ok
 
 
-def _load_env() -> dict[str, str]:
-    """读取 flask_shop/.env，与备份脚本保持同一套取值口径。"""
-    values: dict[str, str] = {}
-    env_file = FLASK_SHOP_ROOT / ".env"
-    if not env_file.exists():
-        return values
-    for line in env_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        values[key.strip()] = value.strip()
-    return values
-
-
 def _connect(database: str | None = None):
-    env = _load_env()
+    url = _source_url()
     return pymysql.connect(
-        host=env.get("MYSQL_HOST", "127.0.0.1"),
-        port=int(env.get("MYSQL_PORT", "3307")),
-        user=env.get("MYSQL_USERNAME", "root"),
-        password=env.get("MYSQL_PASSWORD", "123456"),
+        host=url.host or "127.0.0.1",
+        port=url.port or 3306,
+        user=url.username,
+        password=url.password or "",
         database=database,
         charset="utf8mb4",
         autocommit=True,
     )
 
 
-def _source_db_name() -> str:
-    """正式库名取自 develop 配置，避免与 .env 脱节。"""
-    uri = config_map["develop"].SQLALCHEMY_DATABASE_URI
-    match = re.search(r"/([^/?]+)(\?|$)", uri)
-    return match.group(1) if match else "flask_shop"
+def _source_url():
+    url = make_url(config_map["develop"].SQLALCHEMY_DATABASE_URI)
+    if url.get_backend_name() != "mysql" or not url.database:
+        raise ValueError("恢复演练要求配置 MySQL 数据库")
+    if set(url.query) - {"charset"}:
+        raise ValueError("数据库连接包含未支持的参数，不能安全推断演练连接")
+    return url
 
 
 def _table_counts(cursor) -> dict[str, int]:
@@ -120,15 +107,22 @@ def _table_counts(cursor) -> dict[str, int]:
 
 
 def _restore(backup_file: Path, restore_db: str) -> tuple[int, int]:
+    if not re.fullmatch(r"shop_rehearsal_[0-9a-f]{32}", restore_db):
+        raise ValueError("无效的临时库名称")
+    sql = backup_file.read_text(encoding="utf-8")
+    if not sql.strip():
+        raise ValueError("备份文件为空")
     conn = _connect()
     cursor = conn.cursor()
-    cursor.execute(f"DROP DATABASE IF EXISTS `{restore_db}`")
-    cursor.execute(
-        f"CREATE DATABASE `{restore_db}` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-    )
-    cursor.execute(f"USE `{restore_db}`")
+    try:
+        cursor.execute(
+            f"CREATE DATABASE `{restore_db}` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+        )
+        cursor.execute(f"USE `{restore_db}`")
+    except Exception:
+        conn.close()
+        raise
 
-    sql = backup_file.read_text(encoding="utf-8", errors="replace")
     statements: list[str] = []
     buffer: list[str] = []
     for line in sql.splitlines():
@@ -163,8 +157,15 @@ def main() -> int:
     parser.add_argument("--keep", action="store_true", help="保留恢复库，便于人工排查")
     args = parser.parse_args()
 
-    source_db = _source_db_name()
-    restore_db = os.getenv("RESTORE_DB", f"{source_db}_restore")
+    if os.getenv("RESTORE_DB"):
+        print("不再支持 RESTORE_DB：演练仅使用新建的随机临时库")
+        return 1
+    try:
+        source_db = _source_url().database
+    except ValueError as exc:
+        print(f"数据库配置无效：{exc}")
+        return 1
+    restore_db = f"shop_rehearsal_{uuid4().hex}"
     started = datetime.now()
 
     # --- 0. 前置：源库可达 ---
@@ -195,22 +196,27 @@ def main() -> int:
         return 1
 
     backup_mb = round(backup_file.stat().st_size / 1024 / 1024, 3)
-    check("backup.size.nonzero", backup_file.stat().st_size > 0, f"{backup_mb} MB")
+    if not check("backup.size.nonzero", backup_file.stat().st_size > 0, f"{backup_mb} MB"):
+        source_conn.close()
+        return 1
 
-    # --- 2. 源库快照（备份那一刻的行数，作为核对基线）---
+    # --- 2. 读取当前源库行数作为核对基线 ---
     source_cursor = source_conn.cursor()
     source_counts = _table_counts(source_cursor)
-    check(
+    source_valid = check(
         "source.tables.present",
-        bool(source_counts),
+        bool(source_counts) and all(count >= 0 for count in source_counts.values()),
         f"tables={len(source_counts)}",
     )
+    if not source_valid:
+        source_conn.close()
+        return 1
 
     # --- 3. 恢复到独立临时库 ---
     try:
         statements_ok, statements_fail = _restore(backup_file, restore_db)
     except Exception as exc:  # noqa: BLE001
-        check("restore.executed", False, f"{type(exc).__name__}: {exc}")
+        check("restore.executed", False, f"{type(exc).__name__}: {exc}; 临时库名称={restore_db}")
         source_conn.close()
         return 1
     check(
@@ -234,13 +240,13 @@ def main() -> int:
     }
     check(
         "restore.rowcounts.match",
-        not mismatched,
+        not mismatched and all(count >= 0 for count in restore_counts.values()),
         f"全部 {len(source_counts)} 张表一致" if not mismatched else str(mismatched)[:200],
     )
 
     # --- 5. 业务关键表的数据合法性抽查 ---
     key_present = [t for t in KEY_TABLES if t in restore_counts]
-    check("restore.key.tables.present", len(key_present) >= 3, f"{len(key_present)}/{len(KEY_TABLES)}")
+    check("restore.key.tables.present", len(key_present) == len(KEY_TABLES), f"{len(key_present)}/{len(KEY_TABLES)}")
 
     for table in ("t_order", "t_payments"):
         if table not in restore_counts:
@@ -275,22 +281,25 @@ def main() -> int:
     # --- 6. 正式库未被触碰（前置快照行数应保持不变）---
     after_counts = _table_counts(source_cursor)
     check(
-        "source.db.untouched",
-        after_counts == source_counts,
-        "源库行数演练前后一致",
+        "source.rowcounts.stable",
+        after_counts == source_counts and all(count >= 0 for count in after_counts.values()),
+        "源库行数演练前后一致；这不能证明源库未被修改",
     )
 
+    restore_conn.close()
     # --- 7. 清理临时库（除非 --keep）---
     if not args.keep:
         try:
             admin = _connect()
-            admin.cursor().execute(f"DROP DATABASE IF EXISTS `{restore_db}`")
-            admin.close()
+            try:
+                admin.cursor().execute(f"DROP DATABASE `{restore_db}`")
+            finally:
+                admin.close()
+            check("restore.cleanup", True, "临时库已删除")
         except Exception as exc:  # noqa: BLE001
-            print(f"    (warn) drop restore db failed: {exc}")
+            check("restore.cleanup", False, f"清理临时库失败：{exc}")
 
     source_conn.close()
-    restore_conn.close()
 
     # --- 8. 记录演练结论 ---
     elapsed = round((datetime.now() - started).total_seconds(), 1)

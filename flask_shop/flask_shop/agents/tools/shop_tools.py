@@ -78,7 +78,8 @@ def get_product(pid: int, tenant_slug: str = "demo", tenant_id: Optional[int] = 
     if not tid:
         return None
     with tenant_context(disabled=True):
-        p = models.Product.query.filter_by(id=pid, tenant_id=tid).first()
+        p = (models.Product.query.filter_by(id=pid, tenant_id=tid)
+             .filter((models.Product.state == 2) | (models.Product.state.is_(None))).first())
         if not p:
             return None
         stock = int(p.stock_total())

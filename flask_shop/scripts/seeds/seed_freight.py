@@ -1,5 +1,5 @@
 """
-为每个租户确保有一份默认运费模板（幂等）。
+为演示租户确保有一份默认运费模板（幂等）。
 用法：python scripts/seeds/seed_freight.py
 """
 import os
@@ -10,7 +10,9 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from flask_shop import create_app, db, models  # noqa: E402
+from flask_shop.utils.demo_seed import reject_production_demo_seed  # noqa: E402
 
+reject_production_demo_seed()
 app = create_app('develop')
 
 
@@ -36,7 +38,7 @@ def ensure_default_freight(tenant):
 def main():
     with app.app_context():
         db.create_all()
-        tenants = models.Tenant.query.all()
+        tenants = models.Tenant.query.filter_by(data_mode='demo').all()
         if not tenants:
             print('no tenants; run seed_tenants first')
             return

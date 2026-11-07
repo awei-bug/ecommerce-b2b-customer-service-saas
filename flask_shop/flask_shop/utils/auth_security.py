@@ -11,9 +11,7 @@ from flask_shop import db, models
 
 
 def _client_ip() -> str:
-    # 只信任反向代理已经规范化的第一段地址；生产 Nginx 会覆盖该头。
-    forwarded = request.headers.get('X-Forwarded-For', '')
-    return (forwarded.split(',')[0].strip() if forwarded else (request.remote_addr or 'unknown'))[:128]
+    return (request.remote_addr or 'unknown')[:128]
 
 
 def _hash(value: str) -> str:
