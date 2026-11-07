@@ -34,7 +34,27 @@ def parse_args():
     parser.add_argument('--source-db', default=os.getenv('MYSQL_DB', 'flask_shop'))
     parser.add_argument('--replace', action='store_true', help='目标非空时也继续（会先清空目标表）')
     parser.add_argument('--dry-run', action='store_true', help='只对账，不写入')
+    parser.add_argument('--allow-unmapped-tables', default='',
+                        help='逗号分隔，显式允许跳过的源端未建模表；未列出的表会拒绝迁移')
+    parser.add_argument('--allow-column-loss', action='store_true',
+                        help='允许丢弃含数据的未建模列，默认拒绝')
     return parser.parse_args()
+
+
+def find_unmapped_tables(source_tables, orm_tables):
+    """源库有、ORM 没有的表。整表数据会留在源端，必须显式确认。"""
+    return sorted(set(source_tables) - set(orm_tables))
+
+
+def classify_source_columns(cols, target_cols, rows):
+    """返回可迁移列、被丢弃列、以及丢弃列中非空的行数。"""
+    keep = [c for c in cols if c in target_cols]
+    skip = [c for c in cols if c not in target_cols]
+    if not skip:
+        return keep, skip, 0
+    idx = [cols.index(c) for c in skip]
+    nonnull = sum(1 for row in rows if any(row[i] is not None for i in idx))
+    return keep, skip, nonnull
 
 
 def main():
@@ -55,6 +75,25 @@ def main():
         cursorclass=pymysql.cursors.Cursor,
     )
     cur = source.cursor()
+
+    cur.execute('SHOW TABLES')
+    source_tables = [row[0] for row in cur.fetchall()]
+    allowed_unmapped = {
+        item.strip() for item in args.allow_unmapped_tables.split(',') if item.strip()
+    }
+    unmapped = find_unmapped_tables(source_tables, db.metadata.tables.keys())
+    unexpected = [name for name in unmapped if name not in allowed_unmapped]
+    if unexpected:
+        print('拒绝执行：源库存在 ORM 未建模的表，这些整表数据会留在 MySQL：')
+        for name in unexpected:
+            cur.execute('SELECT COUNT(*) FROM `%s`' % name)
+            print('  %s (%s 行)' % (name, cur.fetchone()[0]))
+        print('请补齐模型，或用 --allow-unmapped-tables 显式列出允许跳过的表。')
+        return 2
+    if unmapped:
+        print('以下源端表未建模，已显式确认跳过，数据仍留在 MySQL：')
+        for name in unmapped:
+            print('  ' + name)
 
     # 父表优先：按 ORM 外键做拓扑排序
     ordered, seen = [], set()
@@ -99,24 +138,26 @@ def main():
     with target.begin() as conn:
         conn.execute(text('SET session_replication_role = replica'))
 
-    rows_out, dropped, failed = [], [], []
+    rows_out, dropped, failed, data_loss = [], [], [], []
     for name in ordered:
         try:
             cur.execute('SELECT COUNT(*) FROM `%s`' % name)
             src = cur.fetchone()[0]
 
-            if src and not args.dry_run:
+            if src:
                 cur.execute('SELECT * FROM `%s`' % name)
                 cols = [d[0] for d in cur.description]
                 data = cur.fetchall()
                 target_cols = {c.name for c in db.metadata.tables[name].columns}
-                keep = [c for c in cols if c in target_cols]
-                skip = [c for c in cols if c not in target_cols]
+                keep, skip, nonnull = classify_source_columns(cols, target_cols, data)
                 if skip:
-                    idx = [cols.index(c) for c in skip]
-                    nonnull = sum(1 for r in data if any(r[i] is not None for i in idx))
                     dropped.append((name, skip, nonnull, len(data)))
-                if keep:
+                    if nonnull and not args.allow_column_loss:
+                        data_loss.append((name, skip, nonnull))
+                        print('拒绝写入 %s：未建模列 %s 含 %d 行非空数据'
+                              % (name, ','.join(skip), nonnull))
+                        continue
+                if keep and not args.dry_run:
                     collist = ', '.join('"%s"' % c for c in keep)
                     ph = ', '.join(':%s' % c for c in keep)
                     stmt = text('INSERT INTO "%s" (%s) VALUES (%s)' % (name, collist, ph))
@@ -156,8 +197,12 @@ def main():
     for f in failed:
         print('  ', f[0], '|', f[1], '|', f[2])
 
+    if data_loss:
+        print('拒绝完成：%d 张表存在未建模列且含实际数据，本次未写入这些表。'
+              % len(data_loss))
+        print('请先补齐模型字段；确需丢弃请显式传入 --allow-column-loss。')
     source.close()
-    return 0 if not diffs and not failed else 1
+    return 0 if not diffs and not failed and not data_loss else 1
 
 
 if __name__ == '__main__':

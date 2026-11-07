@@ -28,21 +28,25 @@ def _create_order(client, token, pid, number=1, address='事件测试地址'):
     ).get_json()
 
 
-def _event_count(app):
+def _event_count(app, event_type=None):
     with app.app_context():
         with tenant_context(disabled=True):
-            return models.DomainEvent.query.count()
+            query = models.DomainEvent.query
+            if event_type:
+                query = query.filter_by(event_type=event_type)
+            return query.count()
 
 
 def test_order_created_writes_domain_event(api, app):
     client, seed = api['client'], api['seed']
     pid = _stock_product(app, seed['id_a'])
-    before = _event_count(app)
+    before = _event_count(app, 'order.created')
 
     result = _create_order(client, seed['token_a'], pid)
     assert result['status'] == 200
 
-    assert _event_count(app) == before + 1
+    assert _event_count(app, 'order.created') == before + 1
+    assert _event_count(app, 'stock.changed') >= 1
     with app.app_context():
         with tenant_context(disabled=True):
             event = models.DomainEvent.query.order_by(models.DomainEvent.id.desc()).first()
@@ -64,6 +68,7 @@ def test_stock_failure_leaves_no_event(api, app):
     result = _create_order(client, seed['token_a'], pid, number=99)
     assert result['status'] == 400
     assert _event_count(app) == before
+    assert _event_count(app, 'stock.changed') == 0
 
 
 def test_events_endpoint_fails_closed_and_streams_incrementally(api, app):
@@ -85,9 +90,11 @@ def test_events_endpoint_fails_closed_and_streams_incrementally(api, app):
     first = client.get('/api/events?after=0&limit=10', headers=good)
     assert first.status_code == 200
     data = first.get_json()['data']
-    assert len(data['events']) == 1
-    assert data['events'][0]['tenant_id'] == seed['id_a']
-    assert data['events'][0]['id'] == data['next_cursor']
+    kinds = {event['event_type'] for event in data['events']}
+    assert 'order.created' in kinds
+    assert 'stock.changed' in kinds
+    assert all(event['tenant_id'] == seed['id_a'] for event in data['events'])
+    assert data['events'][-1]['id'] == data['next_cursor']
 
     second = client.get(
         f"/api/events?after={data['next_cursor']}&limit=10", headers=good
