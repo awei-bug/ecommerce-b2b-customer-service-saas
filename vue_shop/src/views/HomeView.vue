@@ -161,6 +161,13 @@ function toggleNav() {
   else collapsed.value = !collapsed.value
 }
 function logout() {
+  // 三个模块各自持有令牌，只清宿主这一处会让子应用带着陈旧令牌继续 401。
+  document.querySelectorAll('iframe').forEach((frame) => {
+    try {
+      const origin = frame.src ? new URL(frame.src).origin : null
+      if (origin) frame.contentWindow?.postMessage({ type: 'unified:logout' }, origin)
+    } catch (_) {}
+  })
   clearAuthStorage()
   router.push('/login')
 }

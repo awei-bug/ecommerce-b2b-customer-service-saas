@@ -62,12 +62,18 @@
 
 <script setup>
 import { reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api/index.js'
 import { setAuth } from '@/utils/permission.js'
 
 const router = useRouter()
+const route = useRoute()
+const HANDOFF_ORIGINS = [
+  'http://127.0.0.1:5174',
+  'http://127.0.0.1:5175',
+  'http://127.0.0.1:8090',
+]
 const loading = ref(false)
 const form = reactive({ tenant_slug: 'demo', name: 'admin', pwd: '123456' })
 
@@ -93,6 +99,28 @@ async function onLogin() {
       ElMessage.warning('当前为默认密码，请尽快到店铺设置修改')
     } else {
       ElMessage.success('登录成功')
+    }
+    // 统一登录回跳。子应用 URL 只允许白名单 origin，宿主内部路由直接跳转，
+    // 两者都不做开放重定向。回宿主模块页时由 ModuleHostView 下发令牌。
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
+    if (redirect) {
+      try {
+        const target = new URL(redirect, window.location.origin)
+        if (HANDOFF_ORIGINS.includes(target.origin)) {
+          target.searchParams.set('access_token', body.data.token)
+          window.location.assign(target.toString())
+          return
+        }
+      } catch (_) {}
+      if (redirect.startsWith('/') && !redirect.startsWith('//')) {
+        const moduleState =
+          typeof route.query.module_state === 'string' ? route.query.module_state : ''
+        router.push({
+          path: redirect,
+          query: moduleState ? { module_state: moduleState } : {},
+        })
+        return
+      }
     }
     router.push('/data_list')
   } catch (e) {

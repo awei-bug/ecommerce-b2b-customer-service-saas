@@ -11,6 +11,14 @@ module.exports = defineConfig({
   devServer: {
     port: 8080,
     host: '0.0.0.0',
+    // createWebHistory 的深链与刷新必须回退到 /admin/index.html，
+    // 否则 /admin/module_cross 这类地址直接返回 404。
+    historyApiFallback: {
+      disableDotRule: true,
+      rewrites: [
+        { from: /^\/admin\/.*$/, to: '/admin/index.html' },
+      ],
+    },
     proxy: {
       '/static': { target: apiProxyTarget, changeOrigin: true },
       '^/(user|products|product|orders|order|pay|menu|roles|role|permissions|categorys|attributes|attribute|freight|expresses|dashboard|upload_img|health|api)': {
