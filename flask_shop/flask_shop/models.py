@@ -766,6 +766,38 @@ class AgentTrace(db.Model, BaseModel):
         }
 
 
+class DomainEvent(db.Model, BaseModel):
+    """跨系统领域事件 outbox。
+
+    与业务写操作处于同一事务，下游按自增 id 增量拉取。事件只追加，
+    消费端负责幂等与水位推进。tenant_id 参与自动租户隔离，跨租户
+    查询端点须在 tenant_context(disabled=True) 内执行。
+    """
+    __tablename__ = 't_domain_events'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('t_tenants.id'), nullable=False, index=True)
+    event_type = db.Column(db.String(64), nullable=False, index=True)
+    aggregate_type = db.Column(db.String(32), nullable=False, default='order')
+    aggregate_id = db.Column(db.String(64), nullable=False, index=True)
+    payload = db.Column(db.Text)
+
+    __table_args__ = (
+        db.Index('ix_domain_events_tenant_id', 'tenant_id', 'id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'tenant_id': self.tenant_id,
+            'event_type': self.event_type,
+            'aggregate_type': self.aggregate_type,
+            'aggregate_id': self.aggregate_id,
+            'payload': self.payload,
+            'occurred_at': _d(getattr(self, 'create_time', None)),
+        }
+
+
 
 class AgentMemory(db.Model, BaseModel):
     """持久化导购记忆：按顾客或匿名会话隔离。"""

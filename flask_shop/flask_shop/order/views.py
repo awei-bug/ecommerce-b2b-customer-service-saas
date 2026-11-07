@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import uuid
 from datetime import datetime
 
@@ -224,6 +225,22 @@ class Orders(Resource):
             db.session.rollback()
             return {'status': 400, 'msg': e.message}
 
+        # outbox：与订单、明细、库存扣减共用同一个 commit。库存失败时上面
+        # 已 rollback 并 return，事件不会残留。下游按 id 增量拉取。
+        db.session.add(models.DomainEvent(
+            tenant_id=tenant_id,
+            event_type='order.created',
+            aggregate_type='order',
+            aggregate_id=str(order.id),
+            payload=json.dumps({
+                'order_no': order.order_no,
+                'status': order.status,
+                'price': money_float(order.price),
+                'number': order.number,
+                'item_title': line_rows[0][0].name if line_rows else '',
+                'sku': line_rows[0][5] or '',
+            }, ensure_ascii=False),
+        ))
         db.session.commit()
         write_audit('order.create', 'order', order.id, f'no={order.order_no}')
         return {'status': 200, 'msg': '创建订单成功', 'data': order.to_dict()}

@@ -258,6 +258,9 @@ def create_app(config_name, *, initialize_schema=True, start_background=True):
     from flask_shop.platform_api import platform_bp
     app.register_blueprint(platform_bp)
 
+    from flask_shop.events import events_bp
+    app.register_blueprint(events_bp)
+
     from flask_shop.agents.views import agents_bp
     app.register_blueprint(agents_bp)
 

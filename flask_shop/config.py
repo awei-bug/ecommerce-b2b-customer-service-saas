@@ -84,6 +84,10 @@ class Config:
     DATA_HUB_TOKEN = os.getenv('DATA_HUB_TOKEN', '')
     DATA_HUB_TENANT_SLUG = os.getenv('DATA_HUB_TENANT_SLUG', '')
     DATA_HUB_TIMEOUT = int(os.getenv('DATA_HUB_TIMEOUT', '10'))
+    # 跨系统领域事件：内网增量拉取端点，默认关闭，缺令牌时 fail-closed
+    EVENTS_API_ENABLED = _env_bool('EVENTS_API_ENABLED', '0')
+    EVENTS_API_TOKEN = os.getenv('EVENTS_API_TOKEN', '')
+    EVENTS_API_MAX_LIMIT = int(os.getenv('EVENTS_API_MAX_LIMIT', '500'))
     # 同步时是否把图片落到本地 static（默认直接用内容平台 URL）
     DATA_HUB_FETCH_IMAGES = _env_bool('DATA_HUB_FETCH_IMAGES', '0')
     TENANT_STRICT = _env_bool('TENANT_STRICT', '0')
@@ -146,9 +150,14 @@ class ProductionConfig(Config):
             pass
         try:
             db_url = make_url(cls.SQLALCHEMY_DATABASE_URI)
-            if (db_url.drivername != 'mysql+pymysql' or not db_url.username or not db_url.database
+            dialect = (db_url.drivername or '').lower()
+            supported_dialects = {
+                'mysql+pymysql', 'postgresql', 'postgresql+psycopg',
+                'postgresql+psycopg2', 'postgresql+pg8000',
+            }
+            if (dialect not in supported_dialects or not db_url.username or not db_url.database
                     or not (db_url.host or db_url.query.get('unix_socket'))):
-                errors.append('生产环境必须配置完整的 mysql+pymysql 数据库连接')
+                errors.append('生产环境必须配置完整的 MySQL 或 PostgreSQL 数据库连接')
             if {str(key).lower() for key in db_url.query} & {'password', 'passwd', 'user', 'host', 'port', 'database', 'db'}:
                 errors.append('DATABASE_URL 查询参数不能覆盖数据库连接或凭据')
             db_password = db_url.password or ''
