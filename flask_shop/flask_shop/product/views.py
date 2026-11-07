@@ -932,3 +932,49 @@ def hub_sync_products():
         'msg': f"同步完成：新建 {s.get('created') or 0}，更新 {s.get('updated') or 0}，待补价 {s.get('pending') or 0}",
         'data': result,
     }
+
+
+@product_bp.route('/products/hub/publish/', methods=['POST'])
+@login_required
+def hub_publish_product():
+    """把商城自建商品登记到数据中心，建立 external_id 绑定。
+
+    body: {product_id}
+    与 /products/hub/sync/ 方向相反：sync 是下行消费，本接口是上行登记。
+    没有这一步，自建商品在数据中心没有身份，库存事件只能带空 external_id。
+    """
+    from flask_shop.utils import hub_client, hub_publish
+    from flask_shop.utils.audit import write_audit
+    from flask_shop.utils.rbac import staff_has_permission
+
+    if not staff_has_permission('product:write'):
+        return {'status': 403, 'msg': '无权限管理商品'}
+    if not hub_client.hub_enabled():
+        return {'status': 503, 'msg': '未配置 DATA_HUB_URL，数据中心通道已关闭'}
+
+    tenant_id = require_tenant_id()
+    tenant = db.session.get(models.Tenant, tenant_id)
+    if not tenant:
+        return {'status': 404, 'msg': '租户不存在'}
+    if tenant.slug != (current_app.config.get('DATA_HUB_TENANT_SLUG') or ''):
+        return {'status': 403, 'msg': '当前店铺未配置数据中心'}
+
+    body = request.get_json(silent=True) or {}
+    try:
+        product_id = int(body.get('product_id') or 0)
+    except (TypeError, ValueError):
+        product_id = 0
+    if product_id <= 0:
+        return {'status': 400, 'msg': 'product_id 必须是正整数'}
+
+    try:
+        result = hub_publish.publish_product(tenant, product_id)
+    except hub_publish.PublishError as e:
+        return {'status': 400, 'msg': str(e)}
+    except Exception as e:
+        current_app.logger.exception('hub publish failed')
+        return {'status': 500, 'msg': f'上行失败：{e}'}
+
+    write_audit('product.hub_publish', 'product', result['product_id'],
+                f"external_id={result['external_id']}")
+    return {'status': 200, 'msg': '已登记到数据中心', 'data': result}

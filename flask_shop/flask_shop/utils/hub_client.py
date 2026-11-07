@@ -116,3 +116,20 @@ def ack(external_id: str, product_id: Optional[int], status: str = "published") 
         f"/hub/products/{cfg['slug']}/{external_id}/ack",
         {"product_id": product_id, "status": status},
     )
+
+
+def ingest(items: List[dict], source: str = "shop_publish", job_id: str = "") -> dict:
+    """上行商品资料到数据中心。
+
+    与 fetch_products 方向相反：商城自建商品需要先在数据中心登记，
+    才有稳定的 external_id 供内容、跨境等下游引用。
+    """
+    cfg = _config()
+    if not isinstance(items, list) or not items:
+        raise HubError("上行商品为空")
+    return _request("POST", "/hub/ingest", {
+        "tenant_slug": cfg["slug"],
+        "source": source,
+        "job_id": job_id,
+        "items": items,
+    })
