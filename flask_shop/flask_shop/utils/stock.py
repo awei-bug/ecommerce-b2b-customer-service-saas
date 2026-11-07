@@ -35,6 +35,14 @@ def _emit_stock_event(tenant_id, product_id, sku_id, delta):
         if sku_row:
             stock_after = int(sku_row[0] or 0)
 
+    # 商品在数据中心一侧的标识。内容平台、跨境都以它对齐同一件商品；
+    # 本地自建、从未走过 hub 同步的商品没有这个标识，事件里就是 None。
+    knowledge_row = db.session.execute(
+        text('SELECT external_id FROM t_product_knowledge '
+             'WHERE product_id=:pid AND tenant_id=:tid ORDER BY id DESC LIMIT 1'),
+        {'pid': product_id, 'tid': tenant_id},
+    ).first()
+
     db.session.add(models.DomainEvent(
         tenant_id=tenant_id,
         event_type='stock.changed',
@@ -43,6 +51,7 @@ def _emit_stock_event(tenant_id, product_id, sku_id, delta):
         payload=json.dumps({
             'product_id': product_id,
             'sku_id': sku_id,
+            'external_id': knowledge_row[0] if knowledge_row else None,
             'delta': delta,
             'stock_after': stock_after,
             'item_title': name or '',

@@ -93,6 +93,12 @@ def test_events_endpoint_fails_closed_and_streams_incrementally(api, app):
     kinds = {event['event_type'] for event in data['events']}
     assert 'order.created' in kinds
     assert 'stock.changed' in kinds
+    stock_event = next(e for e in data['events'] if e['event_type'] == 'stock.changed')
+    stock_payload = json.loads(stock_event['payload'])
+    # 本地自建商品没有 hub 标识：字段必须存在且为 None，
+    # 下游据此判断该事件能否映射到数据中心一侧的商品。
+    assert 'external_id' in stock_payload
+    assert stock_payload['external_id'] is None
     assert all(event['tenant_id'] == seed['id_a'] for event in data['events'])
     assert data['events'][-1]['id'] == data['next_cursor']
 
