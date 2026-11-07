@@ -133,7 +133,8 @@ def _apply_item(tenant_id: int, item: Dict[str, Any], publish: bool, *, safe_exi
         db.session.flush()
 
     product.name = name[:128]
-    product.price = price_val
+    # 售价归商城权威。新建时已在构造函数里用 hub 价格初始化；
+    # 已关联商品由商城改价或 SKU 定价决定，重复同步不得覆盖交易定价。
     if publish:
         product.state = 2
 
