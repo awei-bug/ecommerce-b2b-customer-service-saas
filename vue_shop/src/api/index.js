@@ -60,6 +60,14 @@ const api = {
   get_hub_sync_overview() {
     return axios.get(u('/products/hub/overview/'))
   },
+  // 商城自建商品登记到数据中心，建立 external_id 绑定。
+  publish_product_to_hub(productId) {
+    return axios.post(u('/products/hub/publish/'), { product_id: productId })
+  },
+  // 运营提示只在后台展示，不进入 C 端商品介绍与卖点。
+  get_product_ops_notes() {
+    return axios.get(u('/products/ops-notes/'))
+  },
   set_hub_pending_price(knowledgeId, price) {
     return axios.post(u(`/products/hub/pending/${encodeURIComponent(knowledgeId)}/price/`), { price })
   },

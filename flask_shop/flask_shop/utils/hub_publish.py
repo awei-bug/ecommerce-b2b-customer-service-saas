@@ -27,6 +27,26 @@ class PublishError(RuntimeError):
     """上行失败，携带可直接回给前端的消息。"""
 
 
+# 早期版本把补货草稿拼在 desc_zh 尾部、把库存提示塞进卖点，两者都会同步到
+# 商城 C 端。现在运营提示走独立的 ops_note 字段，上行时顺带剥除历史残留。
+OPS_NOTE_MARKER = '【运营提示】'
+LEGACY_STOCK_POINT_PREFIX = '库存提示：'
+
+
+def _clean_customer_text(raw, limit: int):
+    """剥除顾客可见文本里的运营提示，返回清洗结果或 None。"""
+    text = str(raw or '').split(OPS_NOTE_MARKER)[0].strip()
+    return text[:limit] or None
+
+
+def _existing_hub_item(external_id: str) -> dict:
+    """数据中心尚未登记该商品时返回空字典，不把 404 当成故障。"""
+    try:
+        return hub_client.fetch_product(external_id) or {}
+    except hub_client.HubError:
+        return {}
+
+
 def build_external_id(tenant_id: int, product_id: int) -> str:
     """商城侧商品的稳定标识。格式固定，便于从事件里反查来源。"""
     return f"yg-{int(tenant_id)}-{int(product_id)}"
@@ -50,15 +70,26 @@ def _images(product) -> list[str]:
     return urls
 
 
-def build_item(product, external_id: str) -> Dict[str, Any]:
+def build_item(product, external_id: str, existing: dict | None = None) -> Dict[str, Any]:
+    """构造上行数据。
+
+    ingest 是整条覆盖语义，因此必须把数据中心已有的 ops_note 带回，
+    否则一次「发布到数据中心」会把内容平台刚生成的运营提示清掉。
+    """
+    existing = existing or {}
+    points = [
+        point for point in _split_points(product.sell_points)
+        if not point.startswith(LEGACY_STOCK_POINT_PREFIX)
+    ]
     return {
         "external_id": external_id,
         "title": str(product.name or "")[:128],
         "price": money_float(product.price),
         "stock": int(product.number or 0),
-        "desc_zh": str(product.introduce or "")[:4000] or None,
-        "selling_points": _split_points(product.sell_points),
+        "desc_zh": _clean_customer_text(product.introduce, 4000),
+        "selling_points": points,
         "images": _images(product),
+        "ops_note": existing.get("ops_note"),
         "source_job_id": f"shop:{product.id}",
     }
 
@@ -81,7 +112,8 @@ def publish_product(tenant, product_id: int) -> Dict[str, Any]:
 
     binding = _existing_binding(tenant_id, product.id)
     external_id = (binding.external_id if binding else "") or build_external_id(tenant_id, product.id)
-    item = build_item(product, external_id)
+    existing = _existing_hub_item(external_id)
+    item = build_item(product, external_id, existing)
 
     response = hub_client.ingest([item], source="shop_publish", job_id=f"shop:{product.id}")
     results = response.get("results") or []

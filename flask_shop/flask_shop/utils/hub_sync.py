@@ -45,6 +45,8 @@ def _knowledge_payload(item: Dict[str, Any]) -> Dict[str, Any]:
         "desc_en": item.get("desc_en"),
         "images": item.get("images") or [],
         "video_url": item.get("video_url"),
+        # 运营侧提示：只在商城后台展示，不写进商品介绍或卖点。
+        "ops_note": item.get("ops_note"),
         "source_job_id": item.get("source_job_id"),
         "version": item.get("version"),
     }

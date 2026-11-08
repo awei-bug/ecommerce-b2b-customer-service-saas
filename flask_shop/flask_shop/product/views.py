@@ -978,3 +978,26 @@ def hub_publish_product():
     write_audit('product.hub_publish', 'product', result['product_id'],
                 f"external_id={result['external_id']}")
     return {'status': 200, 'msg': '已登记到数据中心', 'data': result}
+
+
+@product_bp.route('/products/ops-notes/', methods=['GET'])
+@login_required
+def product_ops_notes():
+    """后台读取各商品的运营提示，按 product_id 返回映射。
+
+    ops_note 来自数据中心，存于 t_product_knowledge.knowledge_json，
+    不写进商品介绍或卖点，因此 C 端页面看不到它。
+    """
+    from flask_shop.utils.tenant_query import tenant_context
+
+    tenant_id = require_tenant_id()
+    with tenant_context(tenant_id=tenant_id):
+        rows = models.ProductKnowledge.query.filter_by(tenant_id=tenant_id).all()
+        notes = {}
+        for row in rows:
+            if not row.product_id:
+                continue
+            note = str(row.knowledge().get('ops_note') or '').strip()
+            if note:
+                notes[str(row.product_id)] = note
+    return {'status': 200, 'msg': 'ok', 'data': notes}

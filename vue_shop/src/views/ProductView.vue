@@ -88,9 +88,20 @@
                         <el-tag v-else type="info" size="small">下架</el-tag>
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" min-width="340" fixed="right">
+                <el-table-column label="运营提示" min-width="180" show-overflow-tooltip>
+                    <template #default="scope">
+                        {{ opsNotes[String(scope.row.id)] || '—' }}
+                    </template>
+                </el-table-column>
+                <el-table-column label="操作" min-width="430" fixed="right">
                     <template #default="scope">
                         <el-button type="primary" size="small" @click="openEdit(scope.row)">编辑</el-button>
+                        <el-button
+                          size="small"
+                          plain
+                          :loading="hubPublishing === scope.row.id"
+                          @click="publishToHub(scope.row)"
+                        >发布到数据中心</el-button>
                         <el-button type="primary" plain size="small" @click="openSku(scope.row)">规格SKU</el-button>
                         <el-button
                           v-if="scope.row.state === 2 || scope.row.state == null"
@@ -327,6 +338,30 @@ const hubLoading = ref(false)
 const hubOverview = ref(null)
 const hubError = ref('')
 const hubPriceSaving = ref(false)
+const opsNotes = ref({})
+const hubPublishing = ref(0)
+const loadOpsNotes = async () => {
+    try {
+        const res = await api.get_product_ops_notes()
+        opsNotes.value = res?.data?.status === 200 ? (res.data.data || {}) : {}
+    } catch (error) {
+        opsNotes.value = {}
+    }
+}
+const publishToHub = async (row) => {
+    hubPublishing.value = row.id
+    try {
+        const res = await api.publish_product_to_hub(row.id)
+        if (res?.data?.status !== 200) throw new Error(res?.data?.msg || '发布失败')
+        ElMessage.success(`已登记到数据中心：${res.data.data.external_id}`)
+        await loadOpsNotes()
+        if (hubOpen.value) loadHubOverview()
+    } catch (error) {
+        ElMessage.error(error?.userMessage || error?.message || '发布到数据中心失败')
+    } finally {
+        hubPublishing.value = 0
+    }
+}
 const hubStateLabel = (state) => ({ published: '已上架', draft: '草稿/下架', pending_price: '待补价', unavailable: '关联不可用' }[state] || '未知')
 const cycleLabel = (state) => ({ success: '已完成', partial: '部分失败', failed: '同步失败' }[state] || '未知')
 const formatHubTime = (value) => value ? String(value).replace('T', ' ').slice(0, 19) : '暂无'
@@ -415,6 +450,7 @@ const getProductList = () => {
         .then((res) => {
             if (res?.data?.status === 200) productTable.data = res.data.data || []
             else ElMessage.warning(res?.data?.msg || '获取商品失败')
+            loadOpsNotes()
         })
         .finally(() => { loading.value = false })
 }
