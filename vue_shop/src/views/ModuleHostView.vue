@@ -24,11 +24,13 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { isHandoffOrigin } from '@/unified/modules.js'
 
 const props = defineProps({
   title: { type: String, required: true },
   description: { type: String, default: '' },
   src: { type: String, required: true },
+  moduleKey: { type: String, default: '' },
 })
 
 const router = useRouter()
@@ -38,13 +40,7 @@ const loaded = ref(false)
 const nonce = ref(0)
 const childTitle = ref('')
 
-// 只接受三个被承载模块的来源，避免任意页面伪造宿主消息。
-const ALLOWED_ORIGINS = [
-  'http://127.0.0.1:5174',
-  'http://127.0.0.1:5175',
-  'http://127.0.0.1:8090',
-]
-
+// 来源白名单来自统一模块注册表，避免任意页面伪造宿主消息。
 const baseSrc = computed(() => {
   const state = route.query.module_state
   if (typeof state !== 'string' || !state.startsWith('/')) return props.src
@@ -89,14 +85,15 @@ function onFrameLoad() {
 }
 
 function onHostMessage(event) {
-  if (!ALLOWED_ORIGINS.includes(event.origin)) return
+  if (!isHandoffOrigin(event.origin)) return
   const data = event.data
   if (!data || typeof data !== 'object') return
   if (data.type === 'unified:route' && typeof data.title === 'string') {
     childTitle.value = data.title
   }
   if (data.type === 'unified:need-login') {
-    router.push({ path: '/login', query: { redirect: '/module_cross' } })
+    // 回到当前宿主模块页，而不是写死跳到跨境模块。
+    router.push({ path: '/login', query: { redirect: route.path } })
   }
 }
 

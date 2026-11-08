@@ -66,14 +66,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api/index.js'
 import { setAuth } from '@/utils/permission.js'
+import { DEFAULT_HOME, isHandoffOrigin } from '@/unified/modules.js'
 
 const router = useRouter()
 const route = useRoute()
-const HANDOFF_ORIGINS = [
-  'http://127.0.0.1:5174',
-  'http://127.0.0.1:5175',
-  'http://127.0.0.1:8090',
-]
 const loading = ref(false)
 const form = reactive({ tenant_slug: 'demo', name: 'admin', pwd: '123456' })
 
@@ -106,7 +102,7 @@ async function onLogin() {
     if (redirect) {
       try {
         const target = new URL(redirect, window.location.origin)
-        if (HANDOFF_ORIGINS.includes(target.origin)) {
+        if (isHandoffOrigin(target.origin)) {
           target.searchParams.set('access_token', body.data.token)
           window.location.assign(target.toString())
           return
@@ -122,7 +118,7 @@ async function onLogin() {
         return
       }
     }
-    router.push('/data_list')
+    router.push(DEFAULT_HOME)
   } catch (e) {
     ElMessage.error('网络错误')
   } finally {

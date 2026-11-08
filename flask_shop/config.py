@@ -88,6 +88,11 @@ class Config:
     EVENTS_API_ENABLED = _env_bool('EVENTS_API_ENABLED', '0')
     EVENTS_API_TOKEN = os.getenv('EVENTS_API_TOKEN', '')
     EVENTS_API_MAX_LIMIT = int(os.getenv('EVENTS_API_MAX_LIMIT', '500'))
+    # 统一经营看板的上游地址：换成非本机部署时由环境变量覆盖，不改代码。
+    UNIFIED_CROSS_API_URL = os.getenv('UNIFIED_CROSS_API_URL', 'http://127.0.0.1:8000')
+    UNIFIED_CONTENT_API_URL = os.getenv('UNIFIED_CONTENT_API_URL', 'http://127.0.0.1:3100')
+    UNIFIED_HUB_API_URL = os.getenv('UNIFIED_HUB_API_URL', 'http://127.0.0.1:8120')
+    UNIFIED_OVERVIEW_TIMEOUT = os.getenv('UNIFIED_OVERVIEW_TIMEOUT', '2.5')
     # 同步时是否把图片落到本地 static（默认直接用内容平台 URL）
     DATA_HUB_FETCH_IMAGES = _env_bool('DATA_HUB_FETCH_IMAGES', '0')
     TENANT_STRICT = _env_bool('TENANT_STRICT', '0')

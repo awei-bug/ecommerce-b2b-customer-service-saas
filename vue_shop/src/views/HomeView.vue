@@ -19,6 +19,9 @@
         router
         class="aside-menu"
       >
+        <el-menu-item :index="DEFAULT_HOME">
+          <el-icon><DataAnalysis /></el-icon><span>统一经营看板</span>
+        </el-menu-item>
         <el-menu-item index="/data_list">
           <el-icon><Odometer /></el-icon><span>经营首页</span>
         </el-menu-item>
@@ -39,14 +42,9 @@
         <el-menu-item index="/operations_center">
           <el-icon><Operation /></el-icon><span>自动化运营中心</span>
         </el-menu-item>
-        <el-menu-item index="/module_content">
-          <el-icon><MagicStick /></el-icon><span>AI 内容平台</span>
-        </el-menu-item>
-        <el-menu-item index="/module_products">
-          <el-icon><Goods /></el-icon><span>商品协作</span>
-        </el-menu-item>
-        <el-menu-item index="/module_cross">
-          <el-icon><Promotion /></el-icon><span>跨境运营</span>
+        <el-menu-item v-for="module in MODULES" :key="module.key" :index="module.path">
+          <el-icon><component :is="MODULE_ICONS[module.key]" /></el-icon>
+          <span>{{ module.title }}</span>
         </el-menu-item>
         <el-sub-menu index="service">
           <template #title><el-icon><Message /></el-icon><span>客服</span></template>
@@ -99,10 +97,13 @@
 </template>
 
 <script setup>
-import { Close, Expand, Fold, Goods, List, MagicStick, Menu, Message, Odometer, Operation, Picture, Promotion, Setting } from '@element-plus/icons-vue'
+import { Close, DataAnalysis, Expand, Fold, Goods, List, MagicStick, Menu, Message, Odometer, Operation, Picture, Promotion, Setting } from '@element-plus/icons-vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { clearAuthStorage } from '@/utils/permission.js'
+import { DEFAULT_HOME, MODULES } from '@/unified/modules.js'
+
+const MODULE_ICONS = { content: MagicStick, products: Goods, cross: Promotion }
 
 const route = useRoute()
 const router = useRouter()
@@ -150,9 +151,8 @@ const TITLE_MAP = {
   '/role_list': '菜单列表',
   '/shop_settings': '店铺设置',
   '/agent_ops': '运营助手',
-  '/module_content': 'AI 内容平台',
-  '/module_products': '商品协作',
-  '/module_cross': '跨境运营',
+  [DEFAULT_HOME]: '统一经营看板',
+  ...Object.fromEntries(MODULES.map((module) => [module.path, module.title])),
 }
 const pageTitle = computed(() => TITLE_MAP[route.path] || '管理后台')
 watch(() => route.path, () => { mobileOpen.value = false })

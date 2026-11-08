@@ -60,6 +60,10 @@ const api = {
   get_hub_sync_overview() {
     return axios.get(u('/products/hub/overview/'))
   },
+  // 服务端聚合四个系统的真实数据，前端不直接访问 8000 / 3100 / 8120。
+  get_unified_overview() {
+    return axios.get(u('/api/unified/overview/'))
+  },
   // 商城自建商品登记到数据中心，建立 external_id 绑定。
   publish_product_to_hub(productId) {
     return axios.post(u('/products/hub/publish/'), { product_id: productId })

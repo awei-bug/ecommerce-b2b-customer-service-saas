@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '../views/LoginView.vue'
 import HomeView from '../views/HomeView.vue'
+import { DEFAULT_HOME, MODULES } from '../unified/modules.js'
 
 const routes = [
   {
@@ -12,8 +13,9 @@ const routes = [
     path: '/',
     name: 'home',
     component: HomeView,
-    redirect: '/data_list',
+    redirect: DEFAULT_HOME,
     children: [
+      { path: 'unified', name: 'unified', component: () => import('../views/UnifiedDashboardView.vue'), meta: { title: '统一经营看板' } },
       { path: 'automation_center', name: 'automation_center', component: () => import('../views/AutomationCenterView.vue'), meta: { title: '内容中心' } },
       { path: 'operations_center', name: 'operations_center', component: () => import('../views/OperationsCenterView.vue'), meta: { title: '自动化运营中心' } },
       { path: 'data_list', name: 'data_list', component: () => import('../views/DataView.vue'), meta: { title: '经营首页' } },
@@ -31,39 +33,18 @@ const routes = [
       { path: 'role_actions', name: 'role_actions', component: () => import('../views/RoleActionsView.vue'), meta: { title: '动作权限' } },
       { path: 'shop_settings', name: 'shop_settings', component: () => import('../views/ShopSettingsView.vue'), meta: { title: '店铺设置' } },
       { path: 'agent_ops', redirect: { path: '/operations_center', query: { tab: 'assistant' } } },
-      {
-        path: 'module_content',
-        name: 'module_content',
+      ...MODULES.map((module) => ({
+        path: module.path.slice(1),
+        name: module.path.slice(1),
         component: () => import('../views/ModuleHostView.vue'),
         props: {
-          title: 'AI 内容平台',
-          description: '商品内容生成、素材与商品知识同步',
-          src: 'http://127.0.0.1:5174/',
+          moduleKey: module.key,
+          title: module.title,
+          description: module.description,
+          src: module.src,
         },
-        meta: { title: '内容中心' },
-      },
-      {
-        path: 'module_cross',
-        name: 'module_cross',
-        component: () => import('../views/ModuleHostView.vue'),
-        props: {
-          title: '跨境运营',
-          description: '多平台店铺商品与运营任务',
-          src: 'http://127.0.0.1:5175/',
-        },
-        meta: { title: '跨境运营' },
-      },
-      {
-        path: 'module_products',
-        name: 'module_products',
-        component: () => import('../views/ModuleHostView.vue'),
-        props: {
-          title: '商品协作',
-          description: '使用云购商家账号查看已授权的演示店铺商品',
-          src: 'http://127.0.0.1:8090/legacy.html?v=2#products',
-        },
-        meta: { title: '商品协作' },
-      },
+        meta: { title: module.title },
+      })),
       {
         path: ':pathMatch(.*)*',
         name: 'notfound',
