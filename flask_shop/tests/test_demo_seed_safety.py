@@ -15,8 +15,11 @@ BACKEND = ROOT / 'flask_shop'
 
 def run_seed(script, database_uri, *args, config='develop'):
     env = os.environ.copy()
+    # seed 脚本是跨租户的初始化/管理操作，内部显式绕过租户过滤。
+    # CI 的 TENANT_STRICT=1 只用于约束应用请求链路，不应继承给这些子进程，
+    # 否则子进程里查带 tenant_id 的模型会抛 TenantIsolationError。
     env.update(FLASK_CONFIG=config, DATABASE_URL=str(database_uri), PYTHONIOENCODING='utf-8',
-               PYTHONPATH=str(BACKEND))
+               PYTHONPATH=str(BACKEND), TENANT_STRICT='0')
     return subprocess.run([sys.executable, str(script), *args], cwd=BACKEND, env=env,
                           capture_output=True, text=True, encoding='utf-8', timeout=30)
 
@@ -64,7 +67,7 @@ def test_docker_seed_rejects_flask_env_production_before_defaulting_to_sample(tm
     assert not database.exists()
 
 
-def test_reset_passwords_only_touches_demo_tenants(app):
+def test_reset_passwords_only_touches_demo_tenants(app, tenant_a_context):
     with tenant_context(disabled=True):
         live_user = models.User.query.filter_by(name='admin_a').first()
         live_user.password = 'live-password-strong'
@@ -104,7 +107,7 @@ def test_demo_shop_seed_refuses_live_shop_named_demo(app):
         assert db.session.get(models.Tenant, tenant_id).data_mode == 'live'
 
 
-def test_demo_shop_seed_preserves_existing_admin_password(app):
+def test_demo_shop_seed_preserves_existing_admin_password(app, tenant_a_context):
     with tenant_context(disabled=True):
         tenant = models.Tenant(name='演示店铺', slug='demo', status=1, data_mode='demo')
         db.session.add(tenant)

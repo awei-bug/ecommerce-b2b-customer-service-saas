@@ -208,7 +208,7 @@ def test_in_memory_sqlite_audit_does_not_share_caller_connection(monkeypatch):
         db.session.rollback()
 
 
-def test_audit_succeeds_when_business_pool_is_fully_checked_out(tmp_path, monkeypatch):
+def test_audit_succeeds_when_business_pool_is_fully_checked_out(tmp_path, monkeypatch, tenant_a_context):
     from config import TestingConfig
     from flask_shop import create_app
     from flask_shop.utils.audit import write_audit

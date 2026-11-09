@@ -4,7 +4,7 @@ from flask_shop import models
 from flask_shop.utils import hub_client, hub_publish
 
 
-def test_publish_binds_external_id_and_reuses_it(app, monkeypatch):
+def test_publish_binds_external_id_and_reuses_it(app, monkeypatch, tenant_a_context):
     with app.app_context():
         tenant = app._seed_ctx['ta']
         product = app._seed_ctx['product_a']
@@ -56,7 +56,7 @@ def test_publish_binds_external_id_and_reuses_it(app, monkeypatch):
         ).count() == 1
 
 
-def test_publish_does_not_write_binding_when_hub_rejects(app, monkeypatch):
+def test_publish_does_not_write_binding_when_hub_rejects(app, monkeypatch, tenant_a_context):
     with app.app_context():
         tenant = app._seed_ctx['ta']
         product = app._seed_ctx['product_a']

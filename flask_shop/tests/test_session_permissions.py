@@ -10,7 +10,7 @@ def test_session_requires_valid_merchant_identity_and_matching_tenant(api):
     assert mismatch['status'] == 403
 
 
-def test_session_permissions_follow_current_role_not_token_claims(api, app):
+def test_session_permissions_follow_current_role_not_token_claims(api, app, tenant_a_context):
     client, seed = api['client'], api['seed']
     with app.app_context():
         user = models.User.query.filter_by(name='admin_a', tenant_id=seed['id_a']).first()

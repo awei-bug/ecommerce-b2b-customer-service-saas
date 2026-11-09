@@ -103,3 +103,16 @@ def app():
 def api(app):
     client = app.test_client()
     return {'client': client, 'seed': app._seed_ctx}
+
+
+@pytest.fixture
+def tenant_a_context(app):
+    """为直接查 ORM 的测试绑定默认租户 A。
+
+    TENANT_STRICT=1 下，查询带 tenant_id 的模型而没有租户上下文会抛
+    TenantIsolationError。需要该上下文的测试模块用
+    `pytestmark = pytest.mark.usefixtures("tenant_a_context")` 显式声明；
+    绝不做成 autouse —— 跨租户隔离用例必须能自行切换或保持未绑定状态。
+    """
+    with tenant_context(tenant_id=app._seed_ctx['id_a']):
+        yield

@@ -240,7 +240,7 @@ def test_migration_runner_fails_closed_without_connecting_to_database(tmp_path):
         assert not database.exists()
 
 
-def test_go_live_check_uses_explicit_database_and_store_without_schema_changes(app):
+def test_go_live_check_uses_explicit_database_and_store_without_schema_changes(app, tenant_a_context):
     from flask_shop import db, models
     user = models.User.query.filter_by(tenant_id=app._seed_ctx['id_a']).first()
     user.password = 'strong-test-password'
@@ -259,7 +259,7 @@ def test_go_live_check_uses_explicit_database_and_store_without_schema_changes(a
     assert str(app.config['SQLALCHEMY_DATABASE_URI']) not in result.stdout
 
 
-def test_go_live_check_warns_when_platform_api_is_enabled(app):
+def test_go_live_check_warns_when_platform_api_is_enabled(app, tenant_a_context):
     from flask_shop import db, models
     user = models.User.query.filter_by(tenant_id=app._seed_ctx['id_a']).first()
     user.password = 'strong-test-password'
