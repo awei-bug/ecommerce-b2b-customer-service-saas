@@ -3,12 +3,13 @@
 # 运行测试需要 pytest；openpyxl（在 requirements.txt 中）被
 # tests/test_tenant_onboarding.py 用于校验导出的 Excel 模板。
 #
-# 以下两项只被 scripts/ 下的工具脚本使用，应用本体不依赖：
-#   pillow     -> scripts/tools/make_listing_pack_100.py 生成演示商品图
+# 以下一项只被 scripts/ 下的工具脚本使用，应用本体不依赖：
 #   playwright -> scripts/verify/verify_ops_ui.py 后台 UI 校验
 #                 （装完还需执行 `python -m playwright install chromium`）
+#
+# Pillow 由 requirements.txt 统一声明（Pillow==13.0.0），此处不得再固定版本：
+# 两个互斥的 pin 会让 pip 直接 ResolutionImpossible，CI 在装依赖阶段就失败。
 -r requirements.txt
 
 pytest>=8,<10
-pillow==12.3.0
 playwright==1.62.0
